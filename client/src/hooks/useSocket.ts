@@ -44,6 +44,7 @@ interface UseSocketReturn {
   backupExport: () => void;
   backupImport: (json: string) => void;
   exportLogs: () => void;
+  timerExpired: number;
 }
 
 export function useSocket(): UseSocketReturn {
@@ -54,6 +55,7 @@ export function useSocket(): UseSocketReturn {
     socketRef.current.connected ? 'good' : 'disconnected'
   );
   const [ping, setPing] = useState<number | null>(null);
+  const [timerExpired, setTimerExpired] = useState<number>(0);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const buzzDebounceRef = useRef(false);
 
@@ -93,6 +95,7 @@ export function useSocket(): UseSocketReturn {
     (socket as any).on('reconnect_error', onReconnectError);
     socket.on('game:status', onStatus);
     socket.on('pong', onPong);
+    socket.on('timer:expired', () => setTimerExpired((n) => n + 1));
 
     if (socket.connected) setConnected(true);
 
@@ -108,6 +111,7 @@ export function useSocket(): UseSocketReturn {
       (socket as any).off('reconnect_error', onReconnectError);
       socket.off('game:status', onStatus);
       socket.off('pong', onPong);
+      socket.off('timer:expired');
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
     };
   }, []);
@@ -210,6 +214,6 @@ export function useSocket(): UseSocketReturn {
     createCompetition, loadCompetition, deleteCompetition,
     createRound, renameRound, closeRound, openRound, selectRound,
     timerSet, timerStart, timerPause, timerResume, timerReset,
-    backupExport, backupImport, exportLogs,
+    backupExport, backupImport, exportLogs, timerExpired,
   };
 }

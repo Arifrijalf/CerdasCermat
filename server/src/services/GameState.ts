@@ -56,6 +56,8 @@ export class GameStateService {
   private rounds: RoundInfo[] = [];
   private timer: TimerState = { duration: 15, remaining: 15, running: false, startedAt: null };
   private timerInterval: ReturnType<typeof setInterval> | null = null;
+  private timerExpiryInterval: ReturnType<typeof setInterval> | null = null;
+  public onTimerExpired: (() => void) | null = null;
   private awaitingAnswer = false;
   private rebuttalActive = false;
 
@@ -467,6 +469,7 @@ export class GameStateService {
     this.timer.startedAt = Date.now();
     this.timer.remaining = this.timer.duration;
     this.addLog('SYSTEM', 'TIMER_START', `Timer started (${this.timer.duration}s)`);
+    this.startTimerExpiryCheck();
   }
 
   pauseTimer(): void {
@@ -477,6 +480,7 @@ export class GameStateService {
       this.timer.remaining = Math.max(0, this.timer.remaining - elapsed);
     }
     this.timer.startedAt = null;
+    this.stopTimerExpiryCheck();
   }
 
   resumeTimer(): void {
@@ -489,6 +493,7 @@ export class GameStateService {
     this.timer.running = false;
     this.timer.startedAt = null;
     this.timer.remaining = this.timer.duration;
+    this.stopTimerExpiryCheck();
   }
 
   getTimerState(): TimerState {
@@ -498,6 +503,25 @@ export class GameStateService {
       return { ...this.timer, remaining };
     }
     return { ...this.timer };
+  }
+
+  private startTimerExpiryCheck(): void {
+    this.stopTimerExpiryCheck();
+    this.timerExpiryInterval = setInterval(() => {
+      if (this.checkTimerExpired()) {
+        this.pauseTimer();
+        if (this.onTimerExpired) {
+          this.onTimerExpired();
+        }
+      }
+    }, 200);
+  }
+
+  private stopTimerExpiryCheck(): void {
+    if (this.timerExpiryInterval) {
+      clearInterval(this.timerExpiryInterval);
+      this.timerExpiryInterval = null;
+    }
   }
 
   checkTimerExpired(): boolean {

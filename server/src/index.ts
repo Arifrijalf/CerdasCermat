@@ -19,6 +19,12 @@ const io = new Server(server, {
 
 setupSocketHandlers(io);
 
+gameState.onTimerExpired = () => {
+  io.emit('timer:expired');
+  io.emit('timer:sync', gameState.getTimerState());
+  io.emit('game:status', gameState.getStatus());
+};
+
 function getLocalIp(): string {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {

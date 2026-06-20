@@ -25,7 +25,7 @@ export default function JudgePage() {
     createCompetition, loadCompetition, deleteCompetition,
     createRound, renameRound, closeRound, openRound, selectRound,
     timerSet, timerStart, timerPause, timerResume, timerReset,
-    backupExport, backupImport,
+    backupExport, backupImport, timerExpired,
   } = useSocket();
 
   const [showSettings, setShowSettings] = useState(false);
@@ -47,6 +47,13 @@ export default function JudgePage() {
       playSound('winner', settings.soundEnabled, settings.soundVolume);
     }
   }, [status?.winner, status?.winnerName]);
+
+  useEffect(() => {
+    if (timerExpired > 0) {
+      const settings = loadSettings();
+      playSound('alert', settings.soundEnabled, settings.soundVolume);
+    }
+  }, [timerExpired]);
 
   const stateLabel = status?.state ?? 'DISCONNECTED';
   const isReady = status?.state === 'READY';

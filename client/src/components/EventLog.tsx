@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import type { LogEntry } from '@quickbuzz/shared';
 
 interface EventLogProps {
@@ -25,12 +24,6 @@ function getActionClass(action: string): string {
 }
 
 export default function EventLog({ logs }: EventLogProps) {
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
   return (
     <div className="event-log">
       <h3>Event Log</h3>
@@ -46,7 +39,6 @@ export default function EventLog({ logs }: EventLogProps) {
             {entry.message && <span className="log-message">{entry.message}</span>}
           </div>
         ))}
-        <div ref={endRef} />
       </div>
     </div>
   );

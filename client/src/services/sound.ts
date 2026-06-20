@@ -47,10 +47,15 @@ const sounds = {
   connect(volume: number) {
     playTone(880, 0.08, 'sine', volume * 0.4);
   },
+  alert(volume: number) {
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => playTone(800, 0.12, 'square', volume * 0.6), i * 250);
+    }
+  },
 };
 
 export function playSound(
-  type: 'winner' | 'ready' | 'connect',
+  type: 'winner' | 'ready' | 'connect' | 'alert',
   enabled: boolean,
   volume: number
 ): void {

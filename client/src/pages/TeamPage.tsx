@@ -8,7 +8,7 @@ import WinnerAnimation from '../components/WinnerAnimation';
 
 export default function TeamPage() {
   const { teamId } = useParams<{ teamId: string }>();
-  const { status, connected, joinTeam, buzz } = useSocket();
+  const { status, connected, joinTeam, buzz, timerExpired } = useSocket();
   const joined = useRef(false);
   const [showWinnerAnim, setShowWinnerAnim] = useState(false);
   const prevWinnerRef = useRef<string | null>(null);
@@ -32,6 +32,13 @@ export default function TeamPage() {
       playSound('ready', settings.soundEnabled, settings.soundVolume);
     }
   }, [status, teamId]);
+
+  useEffect(() => {
+    if (timerExpired > 0) {
+      const settings = loadSettings();
+      playSound('alert', settings.soundEnabled, settings.soundVolume);
+    }
+  }, [timerExpired]);
 
   if (!teamId) return <div className="page error">Invalid team</div>;
 
