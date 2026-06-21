@@ -79,13 +79,19 @@ quickbuzz/
 │   ├── src/socket/handler.ts  # All WebSocket event handlers
 │   ├── src/app.ts             # Express routes (REST API + ESP32 API)
 │   └── src/index.ts           # HTTP server + LAN IP + mDNS
-├── client/                    # React + Vite (TypeScript)
+├── client/                    # React + Vite + TailwindCSS v4 (TypeScript)
 │   ├── src/pages/
 │   │   ├── TeamPage.tsx       # Buzzer + false start warning
 │   │   ├── JudgePage.tsx      # Full dashboard (all panels)
 │   │   ├── DisplayPage.tsx    # Multi-view projector display
 │   │   └── OverlayPage.tsx    # OBS browser source overlays
-│   ├── src/components/        # UI components
+│   ├── src/components/
+│   │   ├── ui/                # shadcn/ui primitives (button, card, dialog, input, etc.)
+│   │   ├── BuzzerButton.tsx   # Touch-optimized buzzer with motion
+│   │   ├── Scoreboard.tsx     # Live scoreboard with animations
+│   │   ├── Timer.tsx          # Countdown with visual bar
+│   │   ├── SettingsPanel.tsx  # Radix Dialog settings modal
+│   │   └── ...                # Other Framer Motion animated components
 │   └── src/hooks/useSocket.ts # Socket.IO with all event bindings
 ├── shared/types.ts            # Shared TypeScript types (all interfaces)
 ├── data/                      # SQLite database (auto-created)
@@ -453,7 +459,10 @@ Runs 22 unit tests covering:
 ## Tech Stack
 
 - **Backend**: Node.js, Express, Socket.IO, better-sqlite3, TypeScript
-- **Frontend**: React 18, Vite, Socket.IO Client, TypeScript
+- **Frontend**: React 18, Vite, TypeScript
+- **Styling**: TailwindCSS v4, shadcn/ui components (Radix UI primitives, CVA)
+- **Animation**: Framer Motion
+- **Icons**: Lucide React
 - **PWA**: vite-plugin-pwa, Workbox
 - **QR**: qrcode
 - **Audio**: Web Audio API
