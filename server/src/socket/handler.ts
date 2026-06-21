@@ -29,7 +29,8 @@ export function setupSocketHandlers(io: Server): void {
       socket.join(`team:${team}`);
       socket.emit('team:joined', { team, teamName: teamInfo.name });
       socket.emit('game:status', gameState.getStatus(team));
-      io.emit('game:status', gameState.getStatus());
+      io.to('judges').emit('team:connected', { teams: gameState.getConnectedTeams() });
+      io.to('judges').emit('game:status', gameState.getStatus());
     });
 
     // --- Hardware Team Join ---
@@ -48,7 +49,7 @@ export function setupSocketHandlers(io: Server): void {
       socket.join(`team:${team}`);
       socket.emit('team:joined', { team, teamName: teamInfo.name });
       socket.emit('game:status', gameState.getStatus(team));
-      io.emit('game:status', gameState.getStatus());
+      io.to('judges').emit('team:connected', { teams: gameState.getConnectedTeams() });
     });
 
     // --- Buzz ---
@@ -57,38 +58,37 @@ export function setupSocketHandlers(io: Server): void {
       if (result.falseStart) {
         const teamId = gameState.getTeamBySocketId(socket.id);
         if (teamId) {
-          io.volatile.emit('game:false-start', {
+          io.emit('game:false-start', {
             teamId,
             teamName: gameState.getTeamName(teamId),
             action: gameState.getCompetitionSettings().falseStartAction,
           });
         }
-        io.volatile.emit('game:status', gameState.getStatus());
+        io.emit('game:status', gameState.getStatus());
         return;
       }
       if (!result.success) return;
       const winnerId = result.winner!;
       const winnerName = gameState.getTeamName(winnerId);
-      const status = gameState.getStatus();
-      io.volatile.emit('game:winner', { winner: winnerId, winnerName, team: winnerId });
-      io.volatile.emit('game:status', status);
+      io.emit('game:winner', { winner: winnerId, winnerName, team: winnerId });
+      io.to(`team:${winnerId}`).emit('game:status', gameState.getStatus(winnerId));
+      socket.broadcast.emit('game:status', gameState.getStatus());
+      socket.emit('game:status', gameState.getStatus());
     });
 
     // --- Judge Controls ---
     socket.on('judge:start', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.startRound();
-      const status = gameState.getStatus();
-      io.volatile.emit('game:ready');
-      io.volatile.emit('game:status', status);
+      io.emit('game:ready');
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:reset', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.resetRound();
-      const status = gameState.getStatus();
-      io.volatile.emit('game:ready');
-      io.volatile.emit('game:status', status);
+      io.emit('game:ready');
+      io.emit('game:status', gameState.getStatus());
     });
 
     // --- Question Reading ---
@@ -168,17 +168,15 @@ export function setupSocketHandlers(io: Server): void {
     socket.on('judge:add-score', (data: { teamId: string; points: number }) => {
       if (!gameState.canControl(socket.id)) return;
       gameState.addScore(data.teamId, data.points);
-      const status = gameState.getStatus();
-      io.volatile.emit('scores:updated', { teams: status.teams });
-      io.volatile.emit('game:status', status);
+      io.emit('scores:updated', { teams: gameState.getTeams() });
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:set-score', (data: { teamId: string; score: number }) => {
       if (!gameState.canControl(socket.id)) return;
       gameState.setScore(data.teamId, data.score);
-      const status = gameState.getStatus();
-      io.volatile.emit('scores:updated', { teams: status.teams });
-      io.volatile.emit('game:status', status);
+      io.emit('scores:updated', { teams: gameState.getTeams() });
+      io.emit('game:status', gameState.getStatus());
     });
 
     // --- Penalties ---
@@ -207,19 +205,19 @@ export function setupSocketHandlers(io: Server): void {
     socket.on('judge:answer-correct', (data: { teamId: string; points?: number }) => {
       if (!gameState.canControl(socket.id)) return;
       gameState.answerCorrect(data.teamId, data.points ?? 10);
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:answer-wrong', (data: { teamId: string; points?: number }) => {
       if (!gameState.canControl(socket.id)) return;
       gameState.answerWrong(data.teamId, data.points ?? 0);
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:answer-skip', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.answerSkip();
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('game:status', gameState.getStatus());
     });
 
     // --- Rebuttal ---
@@ -307,22 +305,22 @@ export function setupSocketHandlers(io: Server): void {
     socket.on('judge:timer-start', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.startTimer();
-      io.volatile.emit('timer:sync', gameState.getTimerState());
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('timer:sync', gameState.getTimerState());
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:timer-pause', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.pauseTimer();
-      io.volatile.emit('timer:sync', gameState.getTimerState());
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('timer:sync', gameState.getTimerState());
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:timer-resume', () => {
       if (!gameState.canControl(socket.id)) return;
       gameState.resumeTimer();
-      io.volatile.emit('timer:sync', gameState.getTimerState());
-      io.volatile.emit('game:status', gameState.getStatus());
+      io.emit('timer:sync', gameState.getTimerState());
+      io.emit('game:status', gameState.getStatus());
     });
 
     socket.on('judge:timer-reset', () => {
@@ -431,7 +429,8 @@ export function setupSocketHandlers(io: Server): void {
       const teamId = gameState.disconnectTeam(socket.id);
       if (teamId) {
         socket.leave(`team:${teamId}`);
-        io.emit('game:status', gameState.getStatus());
+        io.to('judges').emit('team:connected', { teams: gameState.getConnectedTeams() });
+        io.to('judges').emit('game:status', gameState.getStatus());
       }
       gameState.removeJudgeConnection(socket.id);
     });

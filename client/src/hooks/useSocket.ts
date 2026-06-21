@@ -145,7 +145,7 @@ export function useSocket(): UseSocketReturn {
     if (buzzDebounceRef.current) return;
     buzzDebounceRef.current = true;
     socketRef.current.emit('buzz');
-    setTimeout(() => { buzzDebounceRef.current = false; }, 50);
+    setTimeout(() => { buzzDebounceRef.current = false; }, 300);
   }, []);
 
   const startRound = useCallback(() => { socketRef.current.emit('judge:start'); }, []);

@@ -8,13 +8,11 @@ let socket: TypedSocket | null = null;
 export function getSocket(): TypedSocket {
   if (!socket) {
     socket = io({
-      transports: ['websocket'],
-      upgrade: false,
+      transports: ['websocket', 'polling'],
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 3000,
-      timeout: 5000,
-      forceNew: false,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     }) as TypedSocket;
   }
   return socket;

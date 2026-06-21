@@ -74,7 +74,7 @@ export class GameStateService {
   private teams: TeamConfig[] = [...DEFAULT_TEAMS.map(t => ({ ...t }))];
   private settings: AppSettings = { ...DEFAULT_SETTINGS };
   private lastBuzzTimes: Map<TeamId, number> = new Map();
-  private buzzCooldownMs = 50;
+  private buzzCooldownMs = 200;
   private competition: Competition | null = null;
   private competitions: Competition[] = [];
   private currentRoundId: string | null = null;
@@ -103,8 +103,6 @@ export class GameStateService {
   private bracket: BracketData | null = null;
   private analytics: CompetitionAnalytics = this.createEmptyAnalytics();
   private emergencyState: EmergencyAction = 'none';
-  private cachedStatus: GameStatus | null = null;
-  private statusDirty = true;
 
   constructor() {
     this.loadFromDb();
@@ -139,12 +137,16 @@ export class GameStateService {
 
   private loadSettings(): AppSettings {
     const raw = db.getAllSettings();
+    const parseJson = (value: string | undefined, fallback: string): string => {
+      if (!value) return fallback;
+      try { return JSON.parse(value); } catch { return value; }
+    };
     return {
-      competitionName: raw.competitionName ? JSON.parse(raw.competitionName) : DEFAULT_SETTINGS.competitionName,
+      competitionName: parseJson(raw.competitionName, DEFAULT_SETTINGS.competitionName),
       soundEnabled: raw.soundEnabled === 'true',
       soundVolume: parseFloat(raw.soundVolume || '0.7'),
       fullscreen: raw.fullscreen === 'true',
-      theme: (raw.theme ? JSON.parse(raw.theme) : 'dark') as 'dark' | 'light',
+      theme: parseJson(raw.theme, 'dark') as 'dark' | 'light',
     };
   }
 
@@ -170,7 +172,6 @@ export class GameStateService {
     if (this.logs.length > this.maxLogs) {
       this.logs = this.logs.slice(0, this.maxLogs);
     }
-    this.statusDirty = true;
     db.addAuditLog(team === 'SYSTEM' ? '' : team, action, message);
   }
 
@@ -1085,47 +1086,39 @@ export class GameStateService {
 
   // --- Status ---
   getStatus(forTeam?: TeamId): GameStatus {
-    if (!forTeam && this.cachedStatus && !this.statusDirty) {
-      return this.cachedStatus;
-    }
     const winnerName = this.winner ? this.getTeamName(this.winner) : null;
     const yourTeamName = forTeam ? this.getTeamName(forTeam) : undefined;
     const timerState = this.getTimerState();
-    const status: GameStatus = {
+    return {
       state: this.state,
       winner: this.winner,
       winnerName,
       connectedTeams: this.getConnectedTeams(),
       teams: this.getTeams(),
-      logs: this.logs,
-      settings: this.settings,
+      logs: [...this.logs],
+      settings: this.getSettings(),
       ...(forTeam ? { yourTeam: forTeam, yourTeamName } : {}),
       serverTime: Date.now(),
       competition: this.competition ? { ...this.competition } : null,
-      competitions: this.competitions,
+      competitions: this.getCompetitions(),
       currentRoundId: this.currentRoundId,
       currentRoundName: this.currentRoundName,
-      rounds: this.rounds,
+      rounds: [...this.rounds],
       timer: timerState,
       awaitingAnswer: this.awaitingAnswer,
       rebuttalActive: this.rebuttalActive,
-      teamProfiles: this.teamProfiles,
+      teamProfiles: this.getTeamProfiles(),
       room: this.getCurrentRoom() ?? undefined,
-      rooms: this.rooms,
-      bracket: this.bracket ? { ...this.bracket, matches: [...this.bracket.matches] } : undefined,
-      analytics: this.analytics,
-      competitionSettings: this.competitionSettings,
+      rooms: this.getRooms(),
+      bracket: this.getBracket() ?? undefined,
+      analytics: this.getAnalytics(),
+      competitionSettings: this.getCompetitionSettings(),
       falseStartActive: this.falseStartActive,
       falseStartTeam: this.falseStartTeam,
       falseStartTeamName: this.falseStartTeamName,
       emergencyState: this.emergencyState,
       questionReading: this.questionReading,
     };
-    if (!forTeam) {
-      this.cachedStatus = status;
-      this.statusDirty = false;
-    }
-    return status;
   }
 
   isLocked(): boolean {

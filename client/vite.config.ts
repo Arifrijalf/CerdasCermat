@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -13,8 +15,8 @@ export default defineConfig({
         name: 'QuickBuzz',
         short_name: 'QuickBuzz',
         description: 'Real-time quiz competition buzzer system',
-        theme_color: '#0f0f0f',
-        background_color: '#0f0f0f',
+        theme_color: '#09090b',
+        background_color: '#09090b',
         display: 'standalone',
         orientation: 'portrait',
         scope: '/',
@@ -47,6 +49,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './src'),
       '@shared': path.resolve(__dirname, '../shared'),
       '@quickbuzz/shared': path.resolve(__dirname, '../shared'),
     },

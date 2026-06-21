@@ -22,11 +22,14 @@ export default function OverlayPage({ view }: OverlayPageProps) {
 
   if (view === 'winner') {
     return (
-      <div className="overlay overlay-winner">
+      <div className="w-full h-full flex items-center justify-center bg-transparent">
         {winnerName ? (
-          <div className="overlay-winner-text">{winnerName}</div>
+          <div className="text-6xl font-black text-yellow-400 tracking-wider"
+            style={{ textShadow: '0 0 40px rgba(250,204,21,0.4)' }}>
+            {winnerName}
+          </div>
         ) : (
-          <div className="overlay-winner-text dim">No winner</div>
+          <div className="text-4xl text-white/30 font-bold">No winner</div>
         )}
       </div>
     );
@@ -34,13 +37,13 @@ export default function OverlayPage({ view }: OverlayPageProps) {
 
   if (view === 'score') {
     return (
-      <div className="overlay overlay-score">
-        <div className="overlay-score-list">
+      <div className="w-full h-full flex items-center justify-center bg-transparent">
+        <div className="flex flex-col gap-2 w-full max-w-sm">
           {sorted.slice(0, 5).map((t, i) => (
-            <div key={t.id} className="overlay-score-row">
-              <span className="overlay-rank">#{i + 1}</span>
-              <span className="overlay-name" style={{ color: t.color }}>{t.name}</span>
-              <span className="overlay-pts">{t.score}</span>
+            <div key={t.id} className="flex items-center gap-3 px-4 py-2 bg-black/50 rounded-lg text-lg text-white">
+              <span className="font-bold text-white/50 min-w-[30px]">#{i + 1}</span>
+              <span className="flex-1 font-bold" style={{ color: t.color }}>{t.name}</span>
+              <span className="font-mono font-bold">{t.score}</span>
             </div>
           ))}
         </div>
@@ -50,8 +53,9 @@ export default function OverlayPage({ view }: OverlayPageProps) {
 
   if (view === 'timer') {
     return (
-      <div className="overlay overlay-timer">
-        <div className={`overlay-timer-value ${remaining <= 5 ? 'urgent' : ''}`}>
+      <div className="w-full h-full flex items-center justify-center bg-transparent">
+        <div className={`font-mono font-black text-white ${remaining <= 5 ? 'text-red-500 animate-pulse' : ''}`}
+          style={{ fontSize: '8rem', textShadow: '0 0 40px rgba(0,0,0,0.5)' }}>
           {Math.ceil(remaining)}s
         </div>
       </div>
@@ -60,20 +64,18 @@ export default function OverlayPage({ view }: OverlayPageProps) {
 
   if (view === 'bracket') {
     return (
-      <div className="overlay overlay-bracket">
+      <div className="w-full h-full flex flex-col gap-1 p-3 bg-transparent">
         {bracket && bracket.matches.length > 0 ? (
-          <div className="overlay-bracket-list">
-            {bracket.matches.map(m => (
-              <div key={m.id} className="overlay-bracket-match">
-                <span className="overlay-bracket-team">{m.team1Id ? teams.find(t => t.id === m.team1Id)?.name ?? 'TBD' : 'TBD'}</span>
-                <span className="overlay-bracket-vs">vs</span>
-                <span className="overlay-bracket-team">{m.team2Id ? teams.find(t => t.id === m.team2Id)?.name ?? 'TBD' : 'TBD'}</span>
-                {m.winnerId && <span className="overlay-bracket-winner">✓</span>}
-              </div>
-            ))}
-          </div>
+          bracket.matches.map(m => (
+            <div key={m.id} className="flex items-center gap-2 text-sm px-2 py-1 bg-black/40 rounded text-white">
+              <span className="font-semibold">{m.team1Id ? teams.find(t => t.id === m.team1Id)?.name ?? 'TBD' : 'TBD'}</span>
+              <span className="text-white/40 text-xs">vs</span>
+              <span className="font-semibold">{m.team2Id ? teams.find(t => t.id === m.team2Id)?.name ?? 'TBD' : 'TBD'}</span>
+              {m.winnerId && <span className="text-green-400 ml-auto">✓</span>}
+            </div>
+          ))
         ) : (
-          <div className="overlay-bracket-empty dim">No bracket</div>
+          <div className="text-center text-white/30 py-4">No bracket</div>
         )}
       </div>
     );

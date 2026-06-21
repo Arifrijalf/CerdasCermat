@@ -1,5 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import type { TimerState } from '@quickbuzz/shared';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Clock, Play, Pause, RotateCcw } from 'lucide-react';
 
 interface TimerProps {
   timer: TimerState;
@@ -31,36 +34,64 @@ export default function Timer({ timer, onSet, onStart, onPause, onResume: _onRes
   }, [timer.running, timer.startedAt, timer.remaining]);
 
   const isExpired = displayRemaining <= 0;
-  const progress = timer.duration > 0 ? displayRemaining / timer.duration : 0;
-  const pct = Math.max(0, Math.min(100, progress * 100));
+  const pct = timer.duration > 0 ? Math.max(0, Math.min(100, (displayRemaining / timer.duration) * 100)) : 0;
 
   return (
-    <div className={`timer-panel ${timer.running ? 'running' : ''} ${isExpired ? 'expired' : ''}`}>
-      <h3>Timer</h3>
-      <div className="timer-bar-bg">
-        <div className="timer-bar-fill" style={{ width: `${pct}%` }} />
-      </div>
-      <div className={`timer-value ${isExpired ? 'expired' : ''}`}>
-        {Math.ceil(displayRemaining)}s
-      </div>
-      {isExpired && <div className="timer-expired-msg">TIME'S UP!</div>}
-      <div className="timer-controls">
-        <div className="timer-duration-select">
-          {DURATIONS.map(d => (
-            <button key={d} className={`btn btn-tiny ${timer.duration === d ? 'btn-start' : ''}`} onClick={() => onSet(d)}>
-              {d}s
-            </button>
-          ))}
-        </div>
-        <div className="timer-actions">
-          {!timer.running ? (
-            <button className="btn btn-small btn-start" onClick={onStart} disabled={isExpired}>Start</button>
-          ) : (
-            <button className="btn btn-small btn-reset" onClick={onPause}>Pause</button>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clock className="w-3.5 h-3.5" />
+          Timer
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-4">
+          <div className="h-2 bg-bg-subtle rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${timer.running ? 'duration-100' : 'duration-300'} ${isExpired ? 'bg-danger' : 'bg-accent'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className={`text-center font-mono text-4xl font-bold tabular-nums ${isExpired ? 'text-danger animate-pulse' : 'text-text'}`}>
+            {Math.ceil(displayRemaining)}s
+          </div>
+          {isExpired && (
+            <div className="text-center text-sm font-bold tracking-widest text-danger uppercase">
+              Time's Up!
+            </div>
           )}
-          <button className="btn btn-small btn-export" onClick={onReset}>Reset</button>
+          <div className="flex gap-1.5 flex-wrap justify-center">
+            {DURATIONS.map(d => (
+              <Button
+                key={d}
+                variant={timer.duration === d ? 'default' : 'ghost'}
+                size="xs"
+                onClick={() => onSet(d)}
+                className="font-mono tabular-nums"
+              >
+                {d}s
+              </Button>
+            ))}
+          </div>
+          <div className="flex gap-2 justify-center">
+            {!timer.running ? (
+              <Button variant="success" size="sm" onClick={onStart} disabled={isExpired}>
+                <Play className="w-3.5 h-3.5" />
+                Start
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={onPause}>
+                <Pause className="w-3.5 h-3.5" />
+                Pause
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={onReset}>
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset
+            </Button>
+          </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

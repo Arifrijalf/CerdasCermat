@@ -16,18 +16,18 @@ export default function QrCodeView({ url, label, size = 180 }: QrCodeViewProps) 
         width: size,
         margin: 2,
         color: {
-          dark: '#e8e8e8',
-          light: '#0f0f0f',
+          dark: '#e4e4e7',
+          light: '#18181b',
         },
       });
     }
   }, [url, size]);
 
   return (
-    <div className="qr-code-view">
-      <canvas ref={canvasRef} width={size} height={size} />
-      <div className="qr-label">{label}</div>
-      <div className="qr-url">{url}</div>
+    <div className="flex flex-col items-center gap-2 text-center">
+      <canvas ref={canvasRef} width={size} height={size} className="rounded-lg max-w-full h-auto" />
+      <div className="font-semibold text-sm">{label}</div>
+      <div className="text-[0.6rem] text-text-muted font-mono break-all">{url}</div>
     </div>
   );
 }
