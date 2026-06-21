@@ -13,16 +13,20 @@ const io = new Server(server, {
     origin: config.cors.origin,
     methods: ['GET', 'POST'],
   },
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 30000,
+  pingInterval: 10000,
+  transports: ['websocket'],
+  allowUpgrades: false,
+  perMessageDeflate: false,
+  httpCompression: false,
 });
 
 setupSocketHandlers(io);
 
 gameState.onTimerExpired = () => {
-  io.emit('timer:expired');
-  io.emit('timer:sync', gameState.getTimerState());
-  io.emit('game:status', gameState.getStatus());
+  io.volatile.emit('timer:expired');
+  io.volatile.emit('timer:sync', gameState.getTimerState());
+  io.volatile.emit('game:status', gameState.getStatus());
 };
 
 function getLocalIp(): string {
