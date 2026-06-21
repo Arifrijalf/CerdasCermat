@@ -1,14 +1,15 @@
-# QuickBuzz v2.0 - Professional Competition Platform
+# Cerdas Cermat v2.0 - Professional Competition Platform
 
 A professional-grade, real-time buzzer system for quiz competitions. Fully offline, local network operation with SQLite persistence, PWA support, OBS integration, tournament brackets, multi-room support, and ESP32 hardware compatibility.
 
 ## Quick Start
 
 ```bash
+git clone https://github.com/Arifrijalf/CerdasCermat.git
 cd quickbuzz
-npm install
+npm run install:all
 npm run build
-npm start
+npm run start
 ```
 
 Open `http://YOUR_IP:3000/judge` on the judge device.
@@ -17,64 +18,65 @@ Open `http://YOUR_IP:3000/judge` on the judge device.
 
 ### Judge Dashboard
 
-| Route | Purpose |
-|-------|---------|
-| `/judge` | Main judge dashboard |
-| `/judge/admin` | Admin role (full access) |
+| Route              | Purpose                       |
+| ------------------ | ----------------------------- |
+| `/judge`           | Main judge dashboard          |
+| `/judge/admin`     | Admin role (full access)      |
 | `/judge/assistant` | Assistant role (scoring only) |
-| `/judge/viewer` | Viewer role (read only) |
+| `/judge/viewer`    | Viewer role (read only)       |
 
 ### Team Buzzer
 
-| Route | Purpose |
-|-------|---------|
+| Route       | Purpose                              |
+| ----------- | ------------------------------------ |
 | `/team/:id` | Participant buzzer (e.g., `/team/A`) |
 
 ### Display Screens
 
-| Route | Purpose |
-|-------|---------|
-| `/display` | Main display (winner + teams) |
-| `/display/scoreboard` | Scoreboard ranking |
-| `/display/winner` | Winner announcement |
-| `/display/bracket` | Tournament bracket |
-| `/display/timer` | Large countdown timer |
+| Route                 | Purpose                       |
+| --------------------- | ----------------------------- |
+| `/display`            | Main display (winner + teams) |
+| `/display/scoreboard` | Scoreboard ranking            |
+| `/display/winner`     | Winner announcement           |
+| `/display/bracket`    | Tournament bracket            |
+| `/display/timer`      | Large countdown timer         |
 
 ### OBS Overlays
 
-| Route | Purpose |
-|-------|---------|
-| `/overlay/winner` | Winner name overlay |
-| `/overlay/score` | Top 5 scores overlay |
-| `/overlay/timer` | Timer overlay |
-| `/overlay/bracket` | Bracket overlay |
+| Route              | Purpose              |
+| ------------------ | -------------------- |
+| `/overlay/winner`  | Winner name overlay  |
+| `/overlay/score`   | Top 5 scores overlay |
+| `/overlay/timer`   | Timer overlay        |
+| `/overlay/bracket` | Bracket overlay      |
 
 ### REST API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/status` | Health check |
-| GET | `/api/status/game` | Full game state |
-| GET | `/api/status/teams` | Teams + connections |
-| GET | `/api/status/timer` | Timer state |
-| GET | `/api/status/scoreboard` | Scoreboard sorted |
-| GET | `/api/analytics` | Competition analytics |
-| GET | `/api/bracket` | Tournament bracket |
-| GET | `/api/rooms` | Room list |
-| POST | `/api/buzz` | Hardware buzz endpoint |
-| POST | `/api/reset` | Reset current round |
-| GET | `/api/logs/csv` | Export logs as CSV |
-| GET | `/api/logs/json` | Export logs as JSON |
-| GET | `/api/backup` | Export full database |
-| POST | `/api/backup/import` | Import database |
+| Method | Path                     | Description            |
+| ------ | ------------------------ | ---------------------- |
+| GET    | `/api/status`            | Health check           |
+| GET    | `/api/status/game`       | Full game state        |
+| GET    | `/api/status/teams`      | Teams + connections    |
+| GET    | `/api/status/timer`      | Timer state            |
+| GET    | `/api/status/scoreboard` | Scoreboard sorted      |
+| GET    | `/api/analytics`         | Competition analytics  |
+| GET    | `/api/bracket`           | Tournament bracket     |
+| GET    | `/api/rooms`             | Room list              |
+| POST   | `/api/buzz`              | Hardware buzz endpoint |
+| POST   | `/api/reset`             | Reset current round    |
+| GET    | `/api/logs/csv`          | Export logs as CSV     |
+| GET    | `/api/logs/json`         | Export logs as JSON    |
+| GET    | `/api/backup`            | Export full database   |
+| POST   | `/api/backup/import`     | Import database        |
 
 ## Architecture
 
 ```
 quickbuzz/
 ├── server/                    # Node.js + Express + Socket.IO (TypeScript)
+│   ├── src/config/index.ts    # Environment config (.env loader)
 │   ├── src/services/
-│   │   ├── Database.ts        # SQLite persistence (14 tables)
+│   │   ├── Database.ts        # SQLite persistence (13 tables)
 │   │   └── GameState.ts       # State machine + all competition logic
 │   ├── src/socket/handler.ts  # All WebSocket event handlers
 │   ├── src/app.ts             # Express routes (REST API + ESP32 API)
@@ -93,7 +95,8 @@ quickbuzz/
 │   │   ├── SettingsPanel.tsx  # Radix Dialog settings modal
 │   │   └── ...                # Other Framer Motion animated components
 │   └── src/hooks/useSocket.ts # Socket.IO with all event bindings
-├── shared/types.ts            # Shared TypeScript types (all interfaces)
+├── shared/                    # Shared TypeScript types (all interfaces)
+│   └── types.ts               # GameStatus, TeamConfig, events, etc.
 ├── data/                      # SQLite database (auto-created)
 ├── docs/                      # Documentation guides
 └── vitest.config.ts           # Test configuration
@@ -103,23 +106,23 @@ quickbuzz/
 
 ```
 Team Device                  Judge Device                 Display/Projector
-    │                              │                              │
-    ├── join:team ───────────────> │                              │
-    │   (auto-connect)             │                              │
-    │                              ├── judge:join ────────────>   │
-    │                              │                              │
-    │                              ├── judge:start ───────────>   │
+    │                              │                             │
+    ├── join:team ───────────────> │                             │
+    │   (auto-connect)             │                             │
+    │                              ├── judge:join ────────────>  │
+    │                              │                             │
+    │                              ├── judge:start ───────────>  │
     │                              │   (BUZZER_OPEN)             │
-    │                              │                              │
-    ├── buzz ───────────────────>  │                              │
-    │   (first team wins)          │                              │
+    │                              │                             │
+    ├── buzz ───────────────────>  │                             │
+    │   (first team wins)          │                             │
     │                              │<── game:winner ──────────   │
-    │<── game:status ──────────   │                              │
-    │   (LOCKED + winner)          │                              │
-    │                              │                              │
+    │<── game:status ──────────    │                             │
+    │   (LOCKED + winner)          │                             │
+    │                              │                             │
     │                              ├── judge:answer-correct ──>  │
-    │                              │   (score +10)              │
-    │                              │                              │
+    │                              │   (score +10)               │
+    │                              │                             │
     │                              ├── judge:reset ───────────>  │
     │                              │   (BUZZER_OPEN)             │
 ```
@@ -171,11 +174,11 @@ QUESTION_READING (during question read)
 ```
 Group Stage ──────> Quarter Finals ──> Semi Finals ──> Final
     │                    │                  │             │
-    ├── Team A           ├── A vs B         ├── W1 vs W2   ├── Winner
+    ├── Team A           ├── A vs B         ├── W1 vs W2  ├── Winner
     ├── Team B           ├── C vs D         │             │
-    ├── Team C           ├── E vs F         ├── W3 vs W4   └── Champion
+    ├── Team C           ├── E vs F         ├── W3 vs W4  └── Champion
     ├── Team D           └── G vs H         │
-    ├── Team E                             └── ...
+    ├── Team E                              └── ...
     ├── Team F
     ├── Team G
     └── Team H
@@ -235,12 +238,12 @@ Group Stage ──────> Quarter Finals ──> Semi Finals ──> Final
 
 ### Multi-Role System
 
-| Role | Permissions |
-|------|-------------|
-| Admin | Full access + competition settings + emergency |
-| Main Judge | Competition control + scoring + emergency |
-| Assistant | Scoring only |
-| Viewer | Read only |
+| Role       | Permissions                                    |
+| ---------- | ---------------------------------------------- |
+| Admin      | Full access + competition settings + emergency |
+| Main Judge | Competition control + scoring + emergency      |
+| Assistant  | Scoring only                                   |
+| Viewer     | Read only                                      |
 
 ### Analytics
 
@@ -273,6 +276,7 @@ Group Stage ──────> Quarter Finals ──> Semi Finals ──> Final
 ### ESP32 Compatibility API
 
 REST endpoints:
+
 ```
 GET  /api/status/game
 GET  /api/status/teams
@@ -283,6 +287,7 @@ POST /api/reset
 ```
 
 WebSocket events:
+
 ```
 join:team:hw  - Join as hardware device
 buzz          - Send buzz event
@@ -392,12 +397,12 @@ npm run start
 
 Add these as Browser Sources in OBS:
 
-| Source | URL | Width | Height |
-|--------|-----|-------|--------|
-| Winner | `/overlay/winner` | 800 | 200 |
-| Scores | `/overlay/score` | 400 | 300 |
-| Timer | `/overlay/timer` | 200 | 150 |
-| Bracket | `/overlay/bracket` | 400 | 400 |
+| Source  | URL                | Width | Height |
+| ------- | ------------------ | ----- | ------ |
+| Winner  | `/overlay/winner`  | 800   | 200    |
+| Scores  | `/overlay/score`   | 400   | 300    |
+| Timer   | `/overlay/timer`   | 200   | 150    |
+| Bracket | `/overlay/bracket` | 400   | 400    |
 
 Enable "Allow transparency" in OBS browser source properties.
 
@@ -430,10 +435,12 @@ Runs 22 unit tests covering:
 
 ## Environment Variables (.env)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Bind address |
+| Variable      | Default   | Description                        |
+| ------------- | --------- | ---------------------------------- |
+| `PORT`        | `3000`    | Server port                        |
+| `HOST`        | `0.0.0.0` | Bind address                       |
+| `CORS_ORIGIN` | `*`       | Allowed CORS origins               |
+| `TEAMS`       | `A,B,C,D` | Default team IDs (comma-separated) |
 
 ## Troubleshooting
 
