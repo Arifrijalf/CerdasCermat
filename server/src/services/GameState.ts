@@ -10,12 +10,29 @@ import {
   RoundInfo,
   TimerState,
   JudgeRole,
+  TeamProfile,
+  CompetitionSettings,
+  PenaltyType,
+  PenaltyRecord,
+  BuzzRecord,
+  RoomInfo,
+  BracketData,
+  BracketMatch,
+  CompetitionPhase,
+  QualificationRule,
+  CompetitionAnalytics,
+  TeamAnalytics,
+  EmergencyAction,
+  InputSource,
 } from '@quickbuzz/shared';
 import { db } from './Database';
 
 interface TeamConnection {
   socketId: string;
   teamId: TeamId;
+  source: InputSource;
+  deviceId: string;
+  connectedAt: number;
 }
 
 interface JudgeConnection {
@@ -38,13 +55,22 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
 };
 
+const DEFAULT_COMPETITION_SETTINGS: CompetitionSettings = {
+  penaltyConfig: { wrongAnswer: -10, falseStart: -5, ruleViolation: -15, custom: 0 },
+  falseStartAction: 'warning',
+  falseStartLockDuration: 3000,
+  questionReadingDuration: 5000,
+  rebuttalLockDuration: 3000,
+  maxRebuttals: 1,
+};
+
 export class GameStateService {
   private state: GameState = 'LOCKED';
   private winner: TeamId | null = null;
   private connections: Map<string, TeamConnection> = new Map();
   private judgeConnections: Map<string, JudgeConnection> = new Map();
   private logs: LogEntry[] = [];
-  private maxLogs = 200;
+  private maxLogs = 500;
   private teams: TeamConfig[] = [...DEFAULT_TEAMS.map(t => ({ ...t }))];
   private settings: AppSettings = { ...DEFAULT_SETTINGS };
   private lastBuzzTimes: Map<TeamId, number> = new Map();
@@ -60,9 +86,40 @@ export class GameStateService {
   public onTimerExpired: (() => void) | null = null;
   private awaitingAnswer = false;
   private rebuttalActive = false;
+  private questionReading = false;
+  private questionReadingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  private falseStartTeam: TeamId | null = null;
+  private falseStartTeamName: string | null = null;
+  private falseStartActive = false;
+
+  private competitionSettings: CompetitionSettings = { ...DEFAULT_COMPETITION_SETTINGS };
+  private teamProfiles: Record<string, TeamProfile> = {};
+  private penaltyRecords: PenaltyRecord[] = [];
+  private buzzRecords: BuzzRecord[] = [];
+  private currentRoundStartTime: number = 0;
+  private rooms: RoomInfo[] = [];
+  private currentRoomId: string | null = null;
+  private bracket: BracketData | null = null;
+  private analytics: CompetitionAnalytics = this.createEmptyAnalytics();
+  private emergencyState: EmergencyAction = 'none';
 
   constructor() {
     this.loadFromDb();
+  }
+
+  private createEmptyAnalytics(): CompetitionAnalytics {
+    return {
+      totalBuzzes: 0,
+      correctAnswers: 0,
+      wrongAnswers: 0,
+      averageResponseTime: 0,
+      fastestResponseTime: 0,
+      fastestTeam: null,
+      mostCorrect: null,
+      mostActive: null,
+      teamStats: {},
+    };
   }
 
   private loadFromDb(): void {
@@ -87,6 +144,17 @@ export class GameStateService {
       fullscreen: raw.fullscreen === 'true',
       theme: (raw.theme ? JSON.parse(raw.theme) : 'dark') as 'dark' | 'light',
     };
+  }
+
+  private loadCompetitionSettings(): void {
+    if (this.competition) {
+      const loaded = db.getCompetitionSettings(this.competition.id);
+      if (loaded) {
+        this.competitionSettings = loaded;
+      } else {
+        this.competitionSettings = { ...DEFAULT_COMPETITION_SETTINGS };
+      }
+    }
   }
 
   private addLog(team: TeamId | 'SYSTEM', action: EventType, message?: string): void {
@@ -130,24 +198,41 @@ export class GameStateService {
   }
 
   hasMainJudge(): boolean {
-    return Array.from(this.judgeConnections.values()).some((j) => j.role === 'main');
+    return Array.from(this.judgeConnections.values()).some((j) => j.role === 'main' || j.role === 'admin');
+  }
+
+  canControl(socketId: string): boolean {
+    const role = this.getJudgeRole(socketId);
+    return role === 'admin' || role === 'main' || role === 'assistant';
+  }
+
+  canManage(socketId: string): boolean {
+    const role = this.getJudgeRole(socketId);
+    return role === 'admin' || role === 'main';
   }
 
   // --- Team Connections ---
-  connectTeam(socketId: string, teamId: TeamId): boolean {
+  connectTeam(socketId: string, teamId: TeamId, source: InputSource = 'web', deviceId = ''): boolean {
     const team = this.teams.find((t) => t.id === teamId);
     if (!team || !team.enabled) return false;
     const existing = Array.from(this.connections.values()).find((c) => c.teamId === teamId);
     if (existing && existing.socketId !== socketId) return false;
-    this.connections.set(socketId, { socketId, teamId });
-    this.addLog(teamId, 'CONNECT', `${team.name} connected`);
+    this.connections.set(socketId, { socketId, teamId, source, deviceId, connectedAt: Date.now() });
+    this.addLog(teamId, 'CONNECT', `${team.name} connected via ${source}`);
     return true;
   }
 
   reconnectTeam(socketId: string, teamId: TeamId): boolean {
     const existing = Array.from(this.connections.entries()).find(([_, c]) => c.teamId === teamId);
     if (existing) this.connections.delete(existing[0]);
-    this.connections.set(socketId, { socketId, teamId });
+    const conn = this.connections.get(socketId);
+    this.connections.set(socketId, {
+      socketId,
+      teamId,
+      source: conn?.source ?? 'web',
+      deviceId: conn?.deviceId ?? '',
+      connectedAt: Date.now(),
+    });
     return true;
   }
 
@@ -220,6 +305,20 @@ export class GameStateService {
     return Date.now().toString(36);
   }
 
+  // --- Team Profiles ---
+  getTeamProfiles(): Record<string, TeamProfile> {
+    return { ...this.teamProfiles };
+  }
+
+  updateTeamProfile(teamId: string, data: Partial<TeamProfile>): void {
+    if (this.competition) {
+      db.upsertTeamProfile(teamId, data);
+      const existing = this.teamProfiles[teamId] || { teamId, institution: '', members: [], logo: '', photo: '' };
+      this.teamProfiles[teamId] = { ...existing, ...data, teamId };
+      this.addLog('SYSTEM', 'RESET', `Team profile updated for "${this.getTeamName(teamId)}"`);
+    }
+  }
+
   // --- Scores ---
   addScore(teamId: string, points: number): number {
     const team = this.teams.find((t) => t.id === teamId);
@@ -282,6 +381,12 @@ export class GameStateService {
     }));
     this.currentRoundId = this.rounds.find((r) => r.status === 'open')?.id ?? this.rounds[this.rounds.length - 1]?.id ?? null;
     this.currentRoundName = this.rounds.find((r) => r.id === this.currentRoundId)?.name ?? null;
+    this.loadCompetitionSettings();
+    this.teamProfiles = db.getTeamProfiles(id);
+    this.penaltyRecords = db.getPenaltyRecords(id);
+    this.rooms = db.getRooms(id);
+    this.bracket = db.getBracket(id);
+    this.recalculateAnalytics();
   }
 
   deleteCompetition(id: string): void {
@@ -293,7 +398,80 @@ export class GameStateService {
       this.rounds = [];
       this.currentRoundId = null;
       this.currentRoundName = null;
+      this.competitionSettings = { ...DEFAULT_COMPETITION_SETTINGS };
+      this.teamProfiles = {};
+      this.penaltyRecords = [];
+      this.rooms = [];
+      this.bracket = null;
     }
+  }
+
+  // --- Competition Settings ---
+  getCompetitionSettings(): CompetitionSettings {
+    return { ...this.competitionSettings };
+  }
+
+  updateCompetitionSettings(partial: Partial<CompetitionSettings>): CompetitionSettings {
+    this.competitionSettings = { ...this.competitionSettings, ...partial };
+    if (this.competition) {
+      const dbData: any = {};
+      if (partial.penaltyConfig) dbData.penalty_config = JSON.stringify(partial.penaltyConfig);
+      if (partial.falseStartAction) dbData.false_start_action = partial.falseStartAction;
+      if (partial.falseStartLockDuration !== undefined) dbData.false_start_lock_duration = partial.falseStartLockDuration;
+      if (partial.questionReadingDuration !== undefined) dbData.question_reading_duration = partial.questionReadingDuration;
+      if (partial.rebuttalLockDuration !== undefined) dbData.rebuttal_lock_duration = partial.rebuttalLockDuration;
+      if (partial.maxRebuttals !== undefined) dbData.max_rebuttals = partial.maxRebuttals;
+      db.updateCompetitionSettings(this.competition.id, dbData);
+    }
+    return { ...this.competitionSettings };
+  }
+
+  // --- Penalty System ---
+  applyPenalty(teamId: string, type: PenaltyType, points: number, reason: string, appliedBy: string = 'judge'): PenaltyRecord | null {
+    const team = this.teams.find((t) => t.id === teamId);
+    if (!team) return null;
+
+    const penaltyId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const record: PenaltyRecord = {
+      id: penaltyId,
+      teamId,
+      type,
+      points: -Math.abs(points),
+      reason,
+      timestamp: new Date().toISOString(),
+      appliedBy,
+    };
+
+    this.penaltyRecords.push(record);
+    this.addScore(teamId, -Math.abs(points));
+
+    if (this.competition) {
+      db.addPenaltyRecord(penaltyId, teamId, type, -Math.abs(points), reason, this.competition.id);
+    }
+
+    this.addLog(teamId, 'PENALTY', `${team.name} penalty: ${type} (${points > 0 ? '-' : ''}${points}) ${reason ? '- ' + reason : ''}`);
+    return record;
+  }
+
+  removePenalty(penaltyId: string): boolean {
+    const idx = this.penaltyRecords.findIndex(p => p.id === penaltyId);
+    if (idx === -1) return false;
+    const penalty = this.penaltyRecords[idx];
+    this.addScore(penalty.teamId, Math.abs(penalty.points));
+    this.penaltyRecords.splice(idx, 1);
+    db.removePenaltyRecord(penaltyId);
+    this.addLog('SYSTEM', 'RESET', `Penalty ${penaltyId} removed from ${this.getTeamName(penalty.teamId)}`);
+    return true;
+  }
+
+  overrideScore(teamId: string, score: number, reason: string): boolean {
+    const team = this.teams.find((t) => t.id === teamId);
+    if (!team) return false;
+    const oldScore = team.score;
+    team.score = score;
+    db.setScore(teamId, score);
+    this.addLog(teamId, 'SCORE_CHANGE', `${team.name} score overridden: ${oldScore} → ${score} (${reason})`);
+    return true;
   }
 
   // --- Rounds ---
@@ -355,17 +533,57 @@ export class GameStateService {
     this.currentRoundName = this.rounds.find((r) => r.id === id)?.name ?? null;
   }
 
-  // --- Buzzer ---
-  buzz(socketId: string): { success: boolean; winner: TeamId | null } {
-    if (this.state !== 'READY') {
-      return { success: false, winner: this.winner };
-    }
+  // --- Question Reading Mode ---
+  setQuestionReading(enabled: boolean): void {
+    this.questionReading = enabled;
+    if (enabled) {
+      this.state = 'QUESTION_READING';
+      this.falseStartActive = false;
+      this.falseStartTeam = null;
+      this.falseStartTeamName = null;
+      this.addLog('SYSTEM', 'RESET', 'Question reading mode activated');
 
+      if (this.competitionSettings.questionReadingDuration > 0) {
+        if (this.questionReadingTimeout) clearTimeout(this.questionReadingTimeout);
+        this.questionReadingTimeout = setTimeout(() => {
+          if (this.questionReading) {
+            this.questionReading = false;
+            this.state = 'BUZZER_OPEN';
+            this.addLog('SYSTEM', 'RESET', 'Buzzer opened after question reading');
+          }
+        }, this.competitionSettings.questionReadingDuration);
+      }
+    } else {
+      if (this.questionReadingTimeout) {
+        clearTimeout(this.questionReadingTimeout);
+        this.questionReadingTimeout = null;
+      }
+      if (this.state === 'QUESTION_READING') {
+        this.state = 'BUZZER_OPEN';
+      }
+    }
+  }
+
+  // --- Buzzer ---
+  buzz(socketId: string): { success: boolean; winner: TeamId | null; falseStart?: boolean } {
     const teamId = this.getTeamBySocketId(socketId);
     if (!teamId) return { success: false, winner: null };
 
     const team = this.teams.find((t) => t.id === teamId);
     if (!team || !team.enabled) return { success: false, winner: null };
+
+    if (this.emergencyState === 'stop' || this.emergencyState === 'freeze' || this.emergencyState === 'lock_all') {
+      return { success: false, winner: null };
+    }
+
+    if (this.state === 'QUESTION_READING') {
+      this.handleFalseStart(teamId, team.name);
+      return { success: false, winner: null, falseStart: true };
+    }
+
+    if (this.state !== 'READY' && this.state !== 'BUZZER_OPEN') {
+      return { success: false, winner: this.winner };
+    }
 
     const now = Date.now();
     const lastBuzz = this.lastBuzzTimes.get(teamId) ?? 0;
@@ -375,6 +593,8 @@ export class GameStateService {
     }
     this.lastBuzzTimes.set(teamId, now);
 
+    const responseTime = now - this.currentRoundStartTime;
+
     this.winner = teamId;
     this.state = 'LOCKED';
     this.awaitingAnswer = true;
@@ -382,31 +602,86 @@ export class GameStateService {
     if (this.currentRoundId) {
       db.updateRound(this.currentRoundId, { winner_id: teamId, winner_name: team.name });
     }
-    this.addLog(teamId, 'BUZZ', `${team.name} buzzed`);
+
+    if (this.competition) {
+      db.addBuzzRecord(teamId, now, responseTime, this.currentRoundId, null, this.competition.id);
+      this.buzzRecords.push({
+        teamId,
+        timestamp: now,
+        responseTime,
+        roundId: this.currentRoundId,
+        correct: null,
+      });
+    }
+
+    this.addLog(teamId, 'BUZZ', `${team.name} buzzed (${responseTime}ms)`);
     this.addLog(teamId, 'WINNER', `${team.name} wins!`);
 
     return { success: true, winner: teamId };
   }
 
+  // --- False Start Detection ---
+  private handleFalseStart(teamId: string, teamName: string): void {
+    this.falseStartTeam = teamId;
+    this.falseStartTeamName = teamName;
+    this.falseStartActive = true;
+
+    const action = this.competitionSettings.falseStartAction;
+    const penaltyConfig = this.competitionSettings.penaltyConfig;
+
+    switch (action) {
+      case 'warning':
+        this.addLog(teamId, 'FALSE_START', `FALSE START - ${teamName} (warning only)`);
+        break;
+      case 'minus_score':
+        this.applyPenalty(teamId, 'false_start', Math.abs(penaltyConfig.falseStart), 'False start during question reading');
+        break;
+      case 'temporary_lock':
+        this.addLog(teamId, 'FALSE_START', `FALSE START - ${teamName} (temporarily locked)`);
+        break;
+      case 'custom_penalty':
+        this.applyPenalty(teamId, 'false_start', Math.abs(penaltyConfig.falseStart), 'False start (custom penalty)');
+        break;
+    }
+
+    if (action === 'temporary_lock') {
+      setTimeout(() => {
+        this.falseStartActive = false;
+        this.falseStartTeam = null;
+        this.falseStartTeamName = null;
+      }, this.competitionSettings.falseStartLockDuration);
+    }
+  }
+
   startRound(): boolean {
-    if (this.state === 'READY') return false;
-    this.state = 'READY';
+    if (this.state === 'READY' || this.state === 'BUZZER_OPEN') return false;
+    this.state = 'BUZZER_OPEN';
     this.winner = null;
     this.awaitingAnswer = false;
     this.rebuttalActive = false;
+    this.falseStartActive = false;
+    this.falseStartTeam = null;
+    this.falseStartTeamName = null;
+    this.questionReading = false;
     this.lastBuzzTimes.clear();
-    db.setBuzzerState({ state: 'READY', winner_id: null });
+    this.currentRoundStartTime = Date.now();
+    db.setBuzzerState({ state: 'BUZZER_OPEN', winner_id: null });
     this.addLog('SYSTEM', 'RESET', 'Round started');
     return true;
   }
 
   resetRound(): boolean {
-    this.state = 'READY';
+    this.state = 'BUZZER_OPEN';
     this.winner = null;
     this.awaitingAnswer = false;
     this.rebuttalActive = false;
+    this.falseStartActive = false;
+    this.falseStartTeam = null;
+    this.falseStartTeamName = null;
+    this.questionReading = false;
     this.lastBuzzTimes.clear();
-    db.setBuzzerState({ state: 'READY', winner_id: null });
+    this.currentRoundStartTime = Date.now();
+    db.setBuzzerState({ state: 'BUZZER_OPEN', winner_id: null });
     this.addLog('SYSTEM', 'RESET', 'Round reset');
     return true;
   }
@@ -416,6 +691,14 @@ export class GameStateService {
     this.awaitingAnswer = false;
     this.addScore(teamId, points);
     this.addLog(teamId, 'ANSWER_CORRECT', `${this.getTeamName(teamId)} answered correctly (+${points})`);
+
+    for (let i = this.buzzRecords.length - 1; i >= 0; i--) {
+      const r = this.buzzRecords[i];
+      if (r.teamId === teamId && r.correct === null) { r.correct = true; break; }
+    }
+    if (this.competition) {
+      this.recalculateAnalytics();
+    }
   }
 
   answerWrong(teamId: string, points: number = 0): void {
@@ -424,6 +707,14 @@ export class GameStateService {
       this.addScore(teamId, -Math.abs(points));
     }
     this.addLog(teamId, 'ANSWER_WRONG', `${this.getTeamName(teamId)} answered incorrectly`);
+
+    for (let i = this.buzzRecords.length - 1; i >= 0; i--) {
+      const r = this.buzzRecords[i];
+      if (r.teamId === teamId && r.correct === null) { r.correct = false; break; }
+    }
+    if (this.competition) {
+      this.recalculateAnalytics();
+    }
   }
 
   answerSkip(): void {
@@ -431,21 +722,23 @@ export class GameStateService {
     this.addLog('SYSTEM', 'ANSWER_SKIP', 'Answer skipped');
   }
 
-  // --- Rebuttal ---
-  startRebuttal(lockDuration: number = 3000): void {
+  // --- Enhanced Rebuttal ---
+  startRebuttal(lockDuration?: number): void {
+    const duration = lockDuration ?? this.competitionSettings.rebuttalLockDuration;
     this.rebuttalActive = true;
     this.awaitingAnswer = false;
     this.state = 'REBUTTAL';
     this.winner = null;
     this.lastBuzzTimes.clear();
-    this.addLog('SYSTEM', 'RESET', 'Rebuttal mode activated');
+    this.addLog('SYSTEM', 'REBUTTAL', `Rebuttal mode activated (lock: ${duration}ms)`);
 
     setTimeout(() => {
       if (this.state === 'REBUTTAL') {
-        this.state = 'READY';
-        db.setBuzzerState({ state: 'READY' });
+        this.state = 'BUZZER_OPEN';
+        db.setBuzzerState({ state: 'BUZZER_OPEN' });
+        this.addLog('SYSTEM', 'RESET', 'Rebuttal lock released, buzzers open');
       }
-    }, lockDuration);
+    }, duration);
   }
 
   endRebuttal(): void {
@@ -453,6 +746,230 @@ export class GameStateService {
     this.state = 'LOCKED';
     db.setBuzzerState({ state: 'LOCKED' });
     this.addLog('SYSTEM', 'RESET', 'Rebuttal mode ended');
+  }
+
+  // --- Emergency Controls ---
+  emergencyStop(): void {
+    this.emergencyState = 'stop';
+    this.state = 'LOCKED';
+    this.winner = null;
+    this.awaitingAnswer = false;
+    this.timer.running = false;
+    this.timer.startedAt = null;
+    if (this.timerExpiryInterval) clearInterval(this.timerExpiryInterval);
+    db.setBuzzerState({ state: 'LOCKED', winner_id: null });
+    this.addLog('SYSTEM', 'EMERGENCY_STOP', 'EMERGENCY STOP activated');
+  }
+
+  emergencyFreeze(): void {
+    this.emergencyState = 'freeze';
+    this.timer.running = false;
+    this.timer.startedAt = null;
+    if (this.timerExpiryInterval) clearInterval(this.timerExpiryInterval);
+    this.addLog('SYSTEM', 'EMERGENCY_FREEZE', 'EMERGENCY FREEZE activated');
+  }
+
+  emergencyUnlock(): void {
+    this.emergencyState = 'none';
+    this.addLog('SYSTEM', 'RESET', 'Emergency cleared, system resumed');
+  }
+
+  lockAllBuzzers(): void {
+    this.emergencyState = 'lock_all';
+    this.state = 'LOCKED';
+    this.timer.running = false;
+    db.setBuzzerState({ state: 'LOCKED' });
+    this.addLog('SYSTEM', 'EMERGENCY_STOP', 'All buzzers locked');
+  }
+
+  // --- Rooms ---
+  getRooms(): RoomInfo[] {
+    return [...this.rooms];
+  }
+
+  getCurrentRoom(): RoomInfo | null {
+    return this.rooms.find(r => r.id === this.currentRoomId) ?? null;
+  }
+
+  createRoom(name: string, teamIds: string[]): RoomInfo {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const room: RoomInfo = { id, name, competitionId: this.competition?.id ?? '', teamIds, judgeId: null, createdAt: new Date().toISOString() };
+    this.rooms.push(room);
+    if (this.competition) {
+      db.createRoom(id, name, this.competition.id, teamIds);
+    }
+    this.addLog('SYSTEM', 'ROOM_CREATED', `Room "${name}" created`);
+    return room;
+  }
+
+  deleteRoom(roomId: string): boolean {
+    const idx = this.rooms.findIndex(r => r.id === roomId);
+    if (idx === -1) return false;
+    const room = this.rooms[idx];
+    this.rooms.splice(idx, 1);
+    db.deleteRoom(roomId);
+    this.addLog('SYSTEM', 'RESET', `Room "${room.name}" deleted`);
+    return true;
+  }
+
+  switchRoom(roomId: string): boolean {
+    const room = this.rooms.find(r => r.id === roomId);
+    if (!room) return false;
+    this.currentRoomId = roomId;
+    this.addLog('SYSTEM', 'ROOM_SWITCHED', `Switched to room "${room.name}"`);
+    return true;
+  }
+
+  // --- Tournament Bracket ---
+  getBracket(): BracketData | null {
+    return this.bracket ? { ...this.bracket, matches: [...this.bracket.matches] } : null;
+  }
+
+  createBracket(phase: CompetitionPhase, teamIds: string[]): BracketData {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const matches = this.generateBracketMatches(phase, teamIds);
+    this.bracket = { id, competitionId: this.competition?.id ?? '', phase, matches, qualifiers: teamIds };
+    if (this.competition) {
+      db.createBracket(id, this.competition.id, phase, matches, teamIds);
+    }
+    this.addLog('SYSTEM', 'BRACKET_UPDATED', `Tournament bracket created for ${phase}`);
+    return this.bracket;
+  }
+
+  private generateBracketMatches(phase: CompetitionPhase, teamIds: string[]): BracketMatch[] {
+    const matches: BracketMatch[] = [];
+    const shuffled = [...teamIds].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < shuffled.length; i += 2) {
+      matches.push({
+        id: `${phase}_m${Math.floor(i / 2)}`,
+        phase,
+        roundNumber: Math.floor(i / 2),
+        team1Id: shuffled[i] || null,
+        team2Id: shuffled[i + 1] || null,
+        winnerId: null,
+        score1: 0,
+        score2: 0,
+        status: 'pending',
+      });
+    }
+    return matches;
+  }
+
+  advanceWinner(matchId: string, winnerId: string): boolean {
+    if (!this.bracket) return false;
+    const match = this.bracket.matches.find(m => m.id === matchId);
+    if (!match) return false;
+    match.winnerId = winnerId;
+    match.status = 'completed';
+    if (match.team1Id === winnerId) match.score1 = 1;
+    else match.score2 = 1;
+    this.addLog('SYSTEM', 'TOURNAMENT_ADVANCED', `${this.getTeamName(winnerId)} advances from ${matchId}`);
+    return true;
+  }
+
+  editBracketMatch(matchId: string, team1Id: string | null, team2Id: string | null): boolean {
+    if (!this.bracket) return false;
+    const match = this.bracket.matches.find(m => m.id === matchId);
+    if (!match) return false;
+    match.team1Id = team1Id;
+    match.team2Id = team2Id;
+    match.winnerId = null;
+    match.score1 = 0;
+    match.score2 = 0;
+    match.status = 'pending';
+    this.addLog('SYSTEM', 'BRACKET_UPDATED', `Match ${matchId} updated`);
+    return true;
+  }
+
+  generateQualifiers(rules: QualificationRule[]): string[] {
+    const qualified: string[] = [];
+    for (const rule of rules) {
+      if (rule.type === 'top_n_per_group') {
+        const groupTeams = this.teams.filter(t => t.enabled).sort((a, b) => b.score - a.score).slice(0, rule.count);
+        qualified.push(...groupTeams.map(t => t.id));
+      } else if (rule.type === 'top_n_overall') {
+        const topTeams = this.teams.filter(t => t.enabled).sort((a, b) => b.score - a.score).slice(0, rule.count);
+        qualified.push(...topTeams.map(t => t.id));
+      }
+    }
+    const unique = [...new Set(qualified)];
+    this.addLog('SYSTEM', 'BRACKET_UPDATED', `Generated qualifiers: ${unique.map(id => this.getTeamName(id)).join(', ')}`);
+    return unique;
+  }
+
+  // --- Analytics ---
+  recalculateAnalytics(): void {
+    if (!this.competition) {
+      this.analytics = this.createEmptyAnalytics();
+      return;
+    }
+
+    const records = db.getBuzzRecords(this.competition.id);
+    const teamStats: Record<string, TeamAnalytics> = {};
+
+    for (const t of this.teams) {
+      teamStats[t.id] = { buzzes: 0, correct: 0, wrong: 0, totalResponseTime: 0, fastestBuzz: null, avgBuzz: 0 };
+    }
+
+    let totalResponseTime = 0;
+    let fastestTime = Infinity;
+    let fastestTeamId: string | null = null;
+
+    for (const record of records) {
+      const stats = teamStats[record.teamId] || { buzzes: 0, correct: 0, wrong: 0, totalResponseTime: 0, fastestBuzz: null, avgBuzz: 0 };
+      stats.buzzes++;
+      stats.totalResponseTime += record.responseTime;
+      totalResponseTime += record.responseTime;
+
+      if (record.responseTime < fastestTime) {
+        fastestTime = record.responseTime;
+        fastestTeamId = record.teamId;
+      }
+      if (!stats.fastestBuzz || record.responseTime < stats.fastestBuzz) {
+        stats.fastestBuzz = record.responseTime;
+      }
+
+      if (record.correct === true) stats.correct++;
+      if (record.correct === false) stats.wrong++;
+
+      teamStats[record.teamId] = stats;
+    }
+
+    for (const id of Object.keys(teamStats)) {
+      const s = teamStats[id];
+      s.avgBuzz = s.buzzes > 0 ? s.totalResponseTime / s.buzzes : 0;
+    }
+
+    const correctAnswers = records.filter(r => r.correct === true).length;
+    const wrongAnswers = records.filter(r => r.correct === false).length;
+
+    let mostCorrectTeam: { teamId: string; teamName: string; count: number } | null = null;
+    let mostActiveTeam: { teamId: string; teamName: string; count: number } | null = null;
+
+    for (const [id, stats] of Object.entries(teamStats)) {
+      if (!mostCorrectTeam || stats.correct > mostCorrectTeam.count) {
+        mostCorrectTeam = { teamId: id, teamName: this.getTeamName(id), count: stats.correct };
+      }
+      if (!mostActiveTeam || stats.buzzes > mostActiveTeam.count) {
+        mostActiveTeam = { teamId: id, teamName: this.getTeamName(id), count: stats.buzzes };
+      }
+    }
+
+    this.analytics = {
+      totalBuzzes: records.length,
+      correctAnswers,
+      wrongAnswers,
+      averageResponseTime: records.length > 0 ? totalResponseTime / records.length : 0,
+      fastestResponseTime: fastestTeamId ? fastestTime : 0,
+      fastestTeam: fastestTeamId ? { teamId: fastestTeamId, teamName: this.getTeamName(fastestTeamId), time: fastestTime } : null,
+      mostCorrect: mostCorrectTeam?.count ? mostCorrectTeam : null,
+      mostActive: mostActiveTeam?.count ? mostActiveTeam : null,
+      teamStats,
+    };
+  }
+
+  getAnalytics(): CompetitionAnalytics {
+    return { ...this.analytics, teamStats: { ...this.analytics.teamStats } };
   }
 
   // --- Timer ---
@@ -586,6 +1103,17 @@ export class GameStateService {
       timer: timerState,
       awaitingAnswer: this.awaitingAnswer,
       rebuttalActive: this.rebuttalActive,
+      teamProfiles: this.getTeamProfiles(),
+      room: this.getCurrentRoom() ?? undefined,
+      rooms: this.getRooms(),
+      bracket: this.getBracket() ?? undefined,
+      analytics: this.getAnalytics(),
+      competitionSettings: this.getCompetitionSettings(),
+      falseStartActive: this.falseStartActive,
+      falseStartTeam: this.falseStartTeam,
+      falseStartTeamName: this.falseStartTeamName,
+      emergencyState: this.emergencyState,
+      questionReading: this.questionReading,
     };
   }
 

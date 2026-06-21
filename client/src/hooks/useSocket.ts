@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import type { GameStatus, TeamId, ConnectionQuality, JudgeRole } from '@quickbuzz/shared';
+import type { GameStatus, TeamId, ConnectionQuality, JudgeRole, PenaltyType, QualificationRule, CompetitionPhase } from '@quickbuzz/shared';
 import { getSocket, type TypedSocket } from '../services/socket';
 
 interface UseSocketReturn {
@@ -45,6 +45,28 @@ interface UseSocketReturn {
   backupImport: (json: string) => void;
   exportLogs: () => void;
   timerExpired: number;
+
+  setQuestionReading: (enabled: boolean) => void;
+  emergencyStop: () => void;
+  emergencyFreeze: () => void;
+  emergencyUnlock: () => void;
+  applyPenalty: (teamId: string, type: PenaltyType, points: number, reason: string) => void;
+  removePenalty: (penaltyId: string) => void;
+  overrideScore: (teamId: string, score: number, reason: string) => void;
+  updateTeamProfile: (teamId: string, profile: Record<string, unknown>) => void;
+  updateCompetitionSettings: (partial: Record<string, unknown>) => void;
+
+  createRoom: (name: string, teamIds: string[]) => void;
+  deleteRoom: (roomId: string) => void;
+  switchRoom: (roomId: string) => void;
+  requestRooms: () => void;
+
+  createBracket: (phase: CompetitionPhase, teamIds: string[]) => void;
+  advanceWinner: (matchId: string, winnerId: string) => void;
+  editBracketMatch: (matchId: string, team1Id: string | null, team2Id: string | null) => void;
+  generateQualifiers: (rules: QualificationRule[]) => void;
+  requestBracket: () => void;
+  requestAnalytics: () => void;
 }
 
 export function useSocket(): UseSocketReturn {
@@ -134,7 +156,7 @@ export function useSocket(): UseSocketReturn {
     socketRef.current.emit('judge:edit-team', { id, name, color, enabled });
   }, []);
   const deleteTeam = useCallback((id: string) => { socketRef.current.emit('judge:delete-team', { id }); }, []);
-  const updateSettings = useCallback((partial: Record<string, unknown>) => { socketRef.current.emit('judge:update-settings', partial); }, []);
+  const updateSettings = useCallback((partial: Record<string, unknown>) => { socketRef.current.emit('judge:update-settings', partial as any); }, []);
 
   const addScore = useCallback((teamId: string, points: number) => {
     socketRef.current.emit('judge:add-score', { teamId, points });
@@ -205,6 +227,75 @@ export function useSocket(): UseSocketReturn {
     socketRef.current.emit('logs:export', { format: 'json' });
   }, []);
 
+  // --- New Phase 4 methods ---
+  const setQuestionReading = useCallback((enabled: boolean) => {
+    socketRef.current.emit('judge:set-question-reading', { enabled });
+  }, []);
+
+  const emergencyStop = useCallback(() => { socketRef.current.emit('judge:emergency-stop'); }, []);
+  const emergencyFreeze = useCallback(() => { socketRef.current.emit('judge:emergency-freeze'); }, []);
+  const emergencyUnlock = useCallback(() => { socketRef.current.emit('judge:emergency-unlock'); }, []);
+
+  const applyPenalty = useCallback((teamId: string, type: PenaltyType, points: number, reason: string) => {
+    socketRef.current.emit('judge:apply-penalty', { teamId, type, points, reason });
+  }, []);
+
+  const removePenalty = useCallback((penaltyId: string) => {
+    socketRef.current.emit('judge:remove-penalty', { penaltyId });
+  }, []);
+
+  const overrideScore = useCallback((teamId: string, score: number, reason: string) => {
+    socketRef.current.emit('judge:override-score', { teamId, score, reason });
+  }, []);
+
+  const updateTeamProfile = useCallback((teamId: string, profile: Record<string, unknown>) => {
+    socketRef.current.emit('judge:update-team-profile', { teamId, profile: profile as any });
+  }, []);
+
+  const updateCompetitionSettings = useCallback((partial: Record<string, unknown>) => {
+    socketRef.current.emit('judge:update-competition-settings', partial as any);
+  }, []);
+
+  const createRoom = useCallback((name: string, teamIds: string[]) => {
+    socketRef.current.emit('judge:create-room', { name, teamIds });
+  }, []);
+
+  const deleteRoom = useCallback((roomId: string) => {
+    socketRef.current.emit('judge:delete-room', { roomId });
+  }, []);
+
+  const switchRoom = useCallback((roomId: string) => {
+    socketRef.current.emit('judge:switch-room', { roomId });
+  }, []);
+
+  const requestRooms = useCallback(() => {
+    socketRef.current.emit('judge:request-rooms');
+  }, []);
+
+  const createBracket = useCallback((phase: CompetitionPhase, teamIds: string[]) => {
+    socketRef.current.emit('judge:create-bracket', { phase, teamIds });
+  }, []);
+
+  const advanceWinner = useCallback((matchId: string, winnerId: string) => {
+    socketRef.current.emit('judge:advance-winner', { matchId, winnerId });
+  }, []);
+
+  const editBracketMatch = useCallback((matchId: string, team1Id: string | null, team2Id: string | null) => {
+    socketRef.current.emit('judge:edit-bracket-match', { matchId, team1Id, team2Id });
+  }, []);
+
+  const generateQualifiers = useCallback((rules: QualificationRule[]) => {
+    socketRef.current.emit('judge:generate-qualifiers', { rules });
+  }, []);
+
+  const requestBracket = useCallback(() => {
+    socketRef.current.emit('judge:request-bracket');
+  }, []);
+
+  const requestAnalytics = useCallback(() => {
+    socketRef.current.emit('judge:request-analytics');
+  }, []);
+
   return {
     socket: socketRef.current, status, connected, quality, ping,
     joinTeam, joinJudge, buzz, startRound, resetRound,
@@ -215,5 +306,12 @@ export function useSocket(): UseSocketReturn {
     createRound, renameRound, closeRound, openRound, selectRound,
     timerSet, timerStart, timerPause, timerResume, timerReset,
     backupExport, backupImport, exportLogs, timerExpired,
+    setQuestionReading,
+    emergencyStop, emergencyFreeze, emergencyUnlock,
+    applyPenalty, removePenalty, overrideScore,
+    updateTeamProfile, updateCompetitionSettings,
+    createRoom, deleteRoom, switchRoom, requestRooms,
+    createBracket, advanceWinner, editBracketMatch, generateQualifiers,
+    requestBracket, requestAnalytics,
   };
 }

@@ -5,7 +5,7 @@ import { loadSettings } from '../services/settings';
 import WinnerAnimation from '../components/WinnerAnimation';
 
 interface DisplayPageProps {
-  view?: 'main' | 'scoreboard' | 'winner';
+  view?: 'main' | 'scoreboard' | 'winner' | 'bracket' | 'timer';
 }
 
 export default function DisplayPage({ view = 'main' }: DisplayPageProps) {
@@ -26,6 +26,64 @@ export default function DisplayPage({ view = 'main' }: DisplayPageProps) {
   const teams = status?.teams ?? [];
   const competitionName = status?.settings?.competitionName ?? 'QuickBuzz';
   const sortedTeams = [...teams].filter(t => t.enabled).sort((a, b) => b.score - a.score);
+  const timer = status?.timer;
+  const remaining = timer?.remaining ?? 0;
+  const bracket = status?.bracket;
+  const questionReading = status?.questionReading ?? false;
+  const falseStartActive = status?.falseStartActive ?? false;
+  const falseStartTeamName = status?.falseStartTeamName ?? null;
+
+  if (view === 'timer') {
+    return (
+      <div className="page display-page display-timer">
+        <div className="display-main timer-display">
+          <div className={`timer-value-big ${remaining <= 5 ? 'urgent' : ''}`}>
+            {Math.ceil(remaining)}s
+          </div>
+          <div className="timer-label">{timer?.running ? 'Running' : 'Paused'}</div>
+        </div>
+        <WinnerAnimation teamName={winnerName ?? ''} visible={showWinnerAnim} onComplete={() => setShowWinnerAnim(false)} />
+      </div>
+    );
+  }
+
+  if (view === 'bracket') {
+    return (
+      <div className="page display-page display-bracket">
+        <div className="display-header">
+          <h1 className="display-title">{competitionName}</h1>
+          <div className="display-state">TOURNAMENT BRACKET</div>
+        </div>
+        <div className="display-main bracket-display-view">
+          {bracket && bracket.matches.length > 0 ? (
+            <div className="bracket-visual">
+              {bracket.matches.map(m => (
+                <div key={m.id} className={`bracket-match-display ${m.status === 'completed' ? 'completed' : ''}`}>
+                  <div className="bracket-team">
+                    <span className="bracket-team-name" style={m.winnerId === m.team1Id ? { color: '#00c853' } : undefined}>
+                      {m.team1Id ? teams.find(t => t.id === m.team1Id)?.name ?? m.team1Id : 'TBD'}
+                    </span>
+                  </div>
+                  <div className="bracket-vs">VS</div>
+                  <div className="bracket-team">
+                    <span className="bracket-team-name" style={m.winnerId === m.team2Id ? { color: '#00c853' } : undefined}>
+                      {m.team2Id ? teams.find(t => t.id === m.team2Id)?.name ?? m.team2Id : 'TBD'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="display-waiting">
+              <div className="display-waiting-icon">◉</div>
+              <div className="display-waiting-text">No bracket configured</div>
+            </div>
+          )}
+        </div>
+        <WinnerAnimation teamName={winnerName ?? ''} visible={showWinnerAnim} onComplete={() => setShowWinnerAnim(false)} />
+      </div>
+    );
+  }
 
   if (view === 'scoreboard') {
     return (
@@ -88,6 +146,20 @@ export default function DisplayPage({ view = 'main' }: DisplayPageProps) {
         <h1 className="display-title">{competitionName}</h1>
         <div className={`display-state ${stateLabel.toLowerCase()}`}>{stateLabel}</div>
       </div>
+
+      {falseStartActive && falseStartTeamName && (
+        <div className="display-false-start">
+          <div className="false-start-label">FALSE START</div>
+          <div className="false-start-team-name">{falseStartTeamName}</div>
+        </div>
+      )}
+
+      {questionReading && (
+        <div className="display-question-reading">
+          <div className="reading-label">Listen to question...</div>
+        </div>
+      )}
+
       <div className="display-main">
         {winnerName ? (
           <div className="display-winner-section">
@@ -97,7 +169,7 @@ export default function DisplayPage({ view = 'main' }: DisplayPageProps) {
         ) : (
           <div className="display-waiting">
             <div className="display-waiting-icon">◉</div>
-            <div className="display-waiting-text">{stateLabel === 'READY' ? 'Waiting for buzz...' : 'Press Start Round'}</div>
+            <div className="display-waiting-text">{stateLabel === 'READY' || stateLabel === 'BUZZER_OPEN' ? 'Waiting for buzz...' : stateLabel === 'QUESTION_READING' ? 'Question being read...' : 'Press Start Round'}</div>
           </div>
         )}
       </div>

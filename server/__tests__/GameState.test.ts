@@ -61,9 +61,9 @@ describe('GameStateService', () => {
       expect(gameState.getStatus().state).toBe('LOCKED');
     });
 
-    it('should be READY after startRound', () => {
+    it('should be BUZZER_OPEN after startRound', () => {
       gameState.startRound();
-      expect(gameState.getStatus().state).toBe('READY');
+      expect(gameState.getStatus().state).toBe('BUZZER_OPEN');
     });
 
     it('should allow reset after lock', () => {
@@ -71,7 +71,7 @@ describe('GameStateService', () => {
       gameState.connectTeam('s1', 'A');
       gameState.buzz('s1');
       gameState.resetRound();
-      expect(gameState.getStatus().state).toBe('READY');
+      expect(gameState.getStatus().state).toBe('BUZZER_OPEN');
       expect(gameState.getWinner()).toBeNull();
     });
   });
@@ -130,12 +130,12 @@ describe('GameStateService', () => {
       expect(gameState.getStatus().rebuttalActive).toBe(true);
     });
 
-    it('should return to READY after rebuttal lock duration', async () => {
+    it('should return to BUZZER_OPEN after rebuttal lock duration', async () => {
       gameState.startRebuttal(50);
       await new Promise(r => setTimeout(r, 100));
-      // After the lock duration, state should return to READY
+      // After the lock duration, state should return to BUZZER_OPEN
       const status = gameState.getStatus();
-      expect(status.state).toBe('READY');
+      expect(status.state).toBe('BUZZER_OPEN');
     });
   });
 

@@ -1,6 +1,6 @@
-# Cerdas Cermat
+# QuickBuzz v2.0 - Professional Competition Platform
 
-A professional-grade, real-time buzzer system for quiz competitions (Lomba Cerdas Cermat). Fully offline, local network operation with SQLite persistence, PWA support, and OBS integration.
+A professional-grade, real-time buzzer system for quiz competitions. Fully offline, local network operation with SQLite persistence, PWA support, OBS integration, tournament brackets, multi-room support, and ESP32 hardware compatibility.
 
 ## Quick Start
 
@@ -8,23 +8,65 @@ A professional-grade, real-time buzzer system for quiz competitions (Lomba Cerda
 cd quickbuzz
 npm install
 npm run build
-npm run start
+npm start
 ```
 
 Open `http://YOUR_IP:3000/judge` on the judge device.
 
 ## Routes
 
-| Route                 | Purpose                              |
-| --------------------- | ------------------------------------ |
-| `/judge`              | Judge dashboard (full control)       |
-| `/team/:id`           | Participant buzzer (e.g., `/team/A`) |
-| `/display`            | Big screen / projector main view     |
-| `/display/scoreboard` | Scoreboard-only display view         |
-| `/display/winner`     | Winner announcement display          |
-| `/overlay/winner`     | OBS overlay — winner name            |
-| `/overlay/score`      | OBS overlay — top scores             |
-| `/overlay/timer`      | OBS overlay — countdown timer        |
+### Judge Dashboard
+
+| Route | Purpose |
+|-------|---------|
+| `/judge` | Main judge dashboard |
+| `/judge/admin` | Admin role (full access) |
+| `/judge/assistant` | Assistant role (scoring only) |
+| `/judge/viewer` | Viewer role (read only) |
+
+### Team Buzzer
+
+| Route | Purpose |
+|-------|---------|
+| `/team/:id` | Participant buzzer (e.g., `/team/A`) |
+
+### Display Screens
+
+| Route | Purpose |
+|-------|---------|
+| `/display` | Main display (winner + teams) |
+| `/display/scoreboard` | Scoreboard ranking |
+| `/display/winner` | Winner announcement |
+| `/display/bracket` | Tournament bracket |
+| `/display/timer` | Large countdown timer |
+
+### OBS Overlays
+
+| Route | Purpose |
+|-------|---------|
+| `/overlay/winner` | Winner name overlay |
+| `/overlay/score` | Top 5 scores overlay |
+| `/overlay/timer` | Timer overlay |
+| `/overlay/bracket` | Bracket overlay |
+
+### REST API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/status` | Health check |
+| GET | `/api/status/game` | Full game state |
+| GET | `/api/status/teams` | Teams + connections |
+| GET | `/api/status/timer` | Timer state |
+| GET | `/api/status/scoreboard` | Scoreboard sorted |
+| GET | `/api/analytics` | Competition analytics |
+| GET | `/api/bracket` | Tournament bracket |
+| GET | `/api/rooms` | Room list |
+| POST | `/api/buzz` | Hardware buzz endpoint |
+| POST | `/api/reset` | Reset current round |
+| GET | `/api/logs/csv` | Export logs as CSV |
+| GET | `/api/logs/json` | Export logs as JSON |
+| GET | `/api/backup` | Export full database |
+| POST | `/api/backup/import` | Import database |
 
 ## Architecture
 
@@ -32,156 +74,261 @@ Open `http://YOUR_IP:3000/judge` on the judge device.
 quickbuzz/
 ├── server/                    # Node.js + Express + Socket.IO (TypeScript)
 │   ├── src/services/
-│   │   ├── Database.ts        # SQLite persistence layer
-│   │   └── GameState.ts       # State machine + competition logic
+│   │   ├── Database.ts        # SQLite persistence (14 tables)
+│   │   └── GameState.ts       # State machine + all competition logic
 │   ├── src/socket/handler.ts  # All WebSocket event handlers
-│   ├── src/app.ts             # Express routes (REST API)
-│   └── src/index.ts           # HTTP server + LAN IP detection
+│   ├── src/app.ts             # Express routes (REST API + ESP32 API)
+│   └── src/index.ts           # HTTP server + LAN IP + mDNS
 ├── client/                    # React + Vite (TypeScript)
 │   ├── src/pages/
-│   │   ├── TeamPage.tsx       # Buzzer with score + timer display
-│   │   ├── JudgePage.tsx      # Full dashboard with all controls
+│   │   ├── TeamPage.tsx       # Buzzer + false start warning
+│   │   ├── JudgePage.tsx      # Full dashboard (all panels)
 │   │   ├── DisplayPage.tsx    # Multi-view projector display
 │   │   └── OverlayPage.tsx    # OBS browser source overlays
-│   ├── src/components/
-│   │   ├── Scoreboard.tsx     # Score management with quick-add
-│   │   ├── Timer.tsx          # Countdown timer with controls
-│   │   ├── AnswerPanel.tsx    # Correct/Wrong/Skip validation
-│   │   ├── CompetitionManager.tsx  # Competition + rounds CRUD
-│   │   ├── TeamManager.tsx    # Team CRUD
-│   │   ├── SettingsPanel.tsx  # App settings
-│   │   ├── QrCodeView.tsx     # QR code generation
-│   │   ├── WinnerAnimation.tsx # Full-screen animation
-│   │   └── NetworkIndicator.tsx # Ping + quality indicator
+│   ├── src/components/        # UI components
 │   └── src/hooks/useSocket.ts # Socket.IO with all event bindings
-├── shared/types.ts            # Shared TypeScript types + interfaces
+├── shared/types.ts            # Shared TypeScript types (all interfaces)
 ├── data/                      # SQLite database (auto-created)
+├── docs/                      # Documentation guides
 └── vitest.config.ts           # Test configuration
+```
+
+## Client Flow
+
+```
+Team Device                  Judge Device                 Display/Projector
+    │                              │                              │
+    ├── join:team ───────────────> │                              │
+    │   (auto-connect)             │                              │
+    │                              ├── judge:join ────────────>   │
+    │                              │                              │
+    │                              ├── judge:start ───────────>   │
+    │                              │   (BUZZER_OPEN)             │
+    │                              │                              │
+    ├── buzz ───────────────────>  │                              │
+    │   (first team wins)          │                              │
+    │                              │<── game:winner ──────────   │
+    │<── game:status ──────────   │                              │
+    │   (LOCKED + winner)          │                              │
+    │                              │                              │
+    │                              ├── judge:answer-correct ──>  │
+    │                              │   (score +10)              │
+    │                              │                              │
+    │                              ├── judge:reset ───────────>  │
+    │                              │   (BUZZER_OPEN)             │
+```
+
+## Socket Flow
+
+```
+Client ──buzz──> Server
+  │                 │
+  │            Validate state
+  │            Check team exists
+  │            Check false start
+  │            Record buzz time
+  │            Update DB
+  │                 │
+  │<──game:status───┤
+  │<──game:winner───┤  (broadcast to all)
+  │                 │
+  │            io.emit('game:status')
+  │            io.emit('game:winner')
+```
+
+## Game States
+
+```
+LOCKED ──startRound──> BUZZER_OPEN
+    ^                      │
+    │                      ├── buzz() (first team wins)
+    │                      │      │
+    │                      │      v
+    │                      │    LOCKED (awaitingAnswer)
+    │                      │      │
+    │                      │  correct / wrong / skip
+    │                      │      │
+    │                      │      v
+    │                      │    RESET
+    │                      │
+    │  rebuttalStart ──> REBUTTAL
+    │                      │
+    └──────────────────────┘
+
+QUESTION_READING (during question read)
+    │
+    └── any buzz ──> FALSE_START
+```
+
+## Tournament Architecture
+
+```
+Group Stage ──────> Quarter Finals ──> Semi Finals ──> Final
+    │                    │                  │             │
+    ├── Team A           ├── A vs B         ├── W1 vs W2   ├── Winner
+    ├── Team B           ├── C vs D         │             │
+    ├── Team C           ├── E vs F         ├── W3 vs W4   └── Champion
+    ├── Team D           └── G vs H         │
+    ├── Team E                             └── ...
+    ├── Team F
+    ├── Team G
+    └── Team H
 ```
 
 ## Features
 
-### Competition Management
+### False Start Detection
 
-- Create, edit, save, load, delete competitions
-- Each competition stores teams, rounds, scores, and settings
-- Data persists in SQLite — no loss on restart
+- Question Reading mode prevents premature buzzing
+- Configurable actions: warning, minus score, temporary lock, custom penalty
+- Visual FALSE START overlay on all displays
+- Full event logging
 
-### Team Management
+### Advanced Penalty System
 
-- Dynamic teams — add, edit, delete, enable/disable
-- Each team has a name, color, and score
-- Default: Alpha, Bravo, Charlie, Delta
-
-### Scoreboard
-
-- Real-time score updates via WebSocket
-- Quick-add buttons: -10, -5, +5, +10, +20
-- Direct score set with input field
-- Auto-sorted by score
-
-### Question Timer
-
-- Configurable durations: 5s, 10s, 15s, 20s, 30s, 60s
-- Controls: Start, Pause, Resume, Reset
-- Visual bar + animated countdown
-- "TIME'S UP!" alert with sound
-- Synchronized across all connected devices
-
-### Round Management
-
-- Create named rounds (Round 1, Round 2, ... Semi Final, Final)
-- Open/close rounds
-- Rename rounds
-- Track which team won each round
-
-### Answer Validation Workflow
-
-1. Team wins buzzer
-2. Awaiting answer state activates
-3. Judge selects: Correct (+points), Wrong (optional penalty), Skip
-4. All actions logged to audit trail
+- Wrong answer penalty (configurable per competition)
+- False start penalty
+- Rule violation penalty
+- Custom penalties with reason tracking
+- All penalties logged with audit trail
 
 ### Rebuttal Mode
 
-- After a wrong answer, judge activates rebuttal
-- Configurable lock period prevents immediate buzzing
-- After lock, buzzers reopen for other teams
-- Visual "REBUTTAL" badge on dashboard
+- After wrong answer, judge activates rebuttal
+- Configurable lock period
+- Other teams can buzz to answer
+- Original team locked out
 
-### Advanced Display Screens
+### Team Profiles
 
-- **Main view**: Winner + connected teams
-- **Scoreboard view**: Full ranking table
-- **Winner view**: Full-screen winner announcement
-- All views auto-synchronize in real time
+- Institution/school name
+- Participant names (members list)
+- Logo and photo support
+- Displayed across all views
 
-### OBS Overlay Mode
+### Tournament Bracket System
 
-- Browser-source compatible transparent overlays
-- `overlay/winner` — floating winner name
-- `overlay/score` — top 5 scores
-- `overlay/timer` — countdown timer
-- Zero configuration — just add as browser source in OBS
+- Group Stage, Quarter Final, Semi Final, Final
+- Visual bracket on display and overlay
+- Pick winners to advance
+- Auto-generate brackets from team list
 
-### Multi-Judge Support
+### Qualification Engine
 
-- **Main Judge**: Full control (start/reset, scores, teams, settings)
-- **Assistant Judge**: Limited control
-- **Viewer**: Read-only access
-- Permissions enforced server-side
+- Top N per group
+- Top N overall
+- Custom qualification rules
+- Auto-generate next round brackets
 
-### Data Persistence (SQLite)
+### Multi-Room Support
 
-- All data persists to SQLite database
-- Competitions, teams, scores, rounds, settings, audit logs
-- No data loss on server restart
-- WAL mode for concurrent read performance
+- Create rooms with assigned teams
+- Independent scoring per room
+- Switch between rooms on judge dashboard
+- All rooms served from single server
 
-### Audit Log System
+### Multi-Role System
 
-- Every action logged: CONNECT, DISCONNECT, BUZZ, WINNER, ANSWER_CORRECT, ANSWER_WRONG, SCORE_CHANGE, TIMER_START, RESET
-- Includes timestamp, team, action, and message
-- Immutable — appended via SQLite, cannot be modified
-- Exportable to CSV and JSON
+| Role | Permissions |
+|------|-------------|
+| Admin | Full access + competition settings + emergency |
+| Main Judge | Competition control + scoring + emergency |
+| Assistant | Scoring only |
+| Viewer | Read only |
+
+### Analytics
+
+- Total buzzes, correct/wrong answers
+- Average and fastest response time
+- Team rankings: Fastest, Most Correct, Most Active
+- Per-team buzz analytics
+
+### Reaction Time Analysis
+
+- Server-side timestamp recording
+- Response time per buzz
+- Team ranking by reaction speed
+- Visual analytics dashboard
+
+### Emergency Controls
+
+- EMERGENCY STOP: Halt all activity
+- FREEZE COMPETITION: Pause timer and state
+- LOCK ALL BUZZERS: Disable all input
+- RESUME: Clear emergency state
+
+### Hardware Integration
+
+- Unified input API for all devices
+- Sources: Web, PWA, ESP32, Arduino
+- Same server-side processing for all inputs
+- Device tracking and logging
+
+### ESP32 Compatibility API
+
+REST endpoints:
+```
+GET  /api/status/game
+GET  /api/status/teams
+GET  /api/status/timer
+GET  /api/status/scoreboard
+POST /api/buzz
+POST /api/reset
+```
+
+WebSocket events:
+```
+join:team:hw  - Join as hardware device
+buzz          - Send buzz event
+game:status   - Receive game state
+game:winner   - Receive winner notification
+```
+
+### Kiosk Mode
+
+- Fullscreen on team devices
+- Disable scrolling and zooming
+- Touch optimized
+- Prevent accidental navigation
+
+### LAN Discovery
+
+- mDNS advertisement as `quickbuzz.local`
+- Auto-detect local IP
+- Works on local network without internet
 
 ### Backup & Restore
 
-- Export full competition state as JSON
-- Import JSON to restore any previous state
-- API: `GET /api/backup` / `POST /api/backup/import`
+- Export: competitions, teams, rounds, settings, profiles, rooms, brackets, buzz records, penalties, logs
+- Import: full state restoration
+- JSON and CSV formats
+- Versioned backup format (v2.0.0)
 
-### PWA (Progressive Web App)
+### Display System
 
-- Installable on Android, iPhone, Windows
-- Service worker with Workbox caching
-- App manifest with SVG icons
+- Main display with winner + team status
+- Scoreboard ranking display
+- Winner-only announcement
+- Tournament bracket display
+- Large countdown timer
+- All views real-time synchronized
 
-### Network Quality
+### OBS Integration
 
-- Real-time ping measurement (5s interval)
-- Quality indicator: good, fair, poor, disconnected
+- Transparent browser source overlays
+- Winner name overlay
+- Top 5 score overlay
+- Timer overlay
+- Bracket overlay
+- Zero configuration
+
+### Reliability
+
+- Server as single source of truth
+- SQLite WAL mode for concurrent reads
 - Auto-reconnect with session restoration
-
-### Winner Animation
-
-- Full-screen overlay animation
-- Stamp-in effect with sparkles
-- Suitable for projectors
-
-### Sound Effects
-
-- Web Audio API (no files needed)
-- Winner fanfare, ready chime, connect pop
-- Volume control + enable/disable
-
-### Accessibility
-
-- High contrast mode (system preference)
-- Reduced motion support
-- Large touch targets
-- Screen reader compatible labels
-- Landscape support on mobile
+- Race condition prevention in buzz handling
+- Emergency state preservation on disconnect
 
 ## Installation
 
@@ -227,6 +374,26 @@ npm run start
    - Judge: `http://192.168.x.x:3000/judge`
    - Teams: `http://192.168.x.x:3000/team/A`
    - Display: `http://192.168.x.x:3000/display`
+   - Bracket: `http://192.168.x.x:3000/display/bracket`
+
+4. Allow port through firewall:
+
+   ```powershell
+   netsh advfirewall firewall add rule name="QuickBuzz" dir=in action=allow protocol=tcp localport=3000
+   ```
+
+## OBS Setup
+
+Add these as Browser Sources in OBS:
+
+| Source | URL | Width | Height |
+|--------|-----|-------|--------|
+| Winner | `/overlay/winner` | 800 | 200 |
+| Scores | `/overlay/score` | 400 | 300 |
+| Timer | `/overlay/timer` | 200 | 150 |
+| Bracket | `/overlay/bracket` | 400 | 400 |
+
+Enable "Allow transparency" in OBS browser source properties.
 
 ## Testing
 
@@ -245,41 +412,22 @@ Runs 22 unit tests covering:
 - Duplicate protection
 - Competition management (create, load)
 
-## OBS Integration
+## Documentation
 
-Add these as Browser Sources in OBS:
-
-| Source | URL               | Width | Height |
-| ------ | ----------------- | ----- | ------ |
-| Winner | `/overlay/winner` | 800   | 200    |
-| Scores | `/overlay/score`  | 400   | 300    |
-| Timer  | `/overlay/timer`  | 200   | 150    |
-
-Enable "Allow transparency" in OBS browser source properties.
-
-## API Endpoints
-
-| Method | Path                 | Description                  |
-| ------ | -------------------- | ---------------------------- |
-| GET    | `/api/status`        | Health check                 |
-| GET    | `/api/logs/csv`      | Export audit log as CSV      |
-| GET    | `/api/logs/json`     | Export audit log as JSON     |
-| GET    | `/api/backup`        | Export full database as JSON |
-| POST   | `/api/backup/import` | Import database from JSON    |
+- [Administrator Guide](docs/ADMINISTRATOR-GUIDE.md)
+- [Judge Guide](docs/JUDGE-GUIDE.md)
+- [Team Guide](docs/TEAM-GUIDE.md)
+- [LAN Deployment Guide](docs/LAN-DEPLOYMENT-GUIDE.md)
+- [Multi-Room Setup Guide](docs/MULTI-ROOM-GUIDE.md)
+- [OBS Setup Guide](docs/OBS-SETUP-GUIDE.md)
+- [ESP32 Integration Guide](docs/ESP32-INTEGRATION-GUIDE.md)
 
 ## Environment Variables (.env)
 
-| Variable | Default   | Description  |
-| -------- | --------- | ------------ |
-| `PORT`   | `3000`    | Server port  |
-| `HOST`   | `0.0.0.0` | Bind address |
-
-## Configuration (Settings Panel)
-
-- Competition name
-- Sound effects on/off + volume
-- Dark/Light theme
-- Fullscreen toggle
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `HOST` | `0.0.0.0` | Bind address |
 
 ## Troubleshooting
 
@@ -296,12 +444,6 @@ Enable "Allow transparency" in OBS browser source properties.
 - Ensure write permissions in install directory
 - Backup before deleting database files
 
-### PWA not installing
-
-- Chrome requires HTTPS or localhost
-- iPhone requires Safari browser
-- Clear browser cache and reload
-
 ### Sound not working
 
 - Browser autoplay policies may require first interaction
@@ -317,13 +459,4 @@ Enable "Allow transparency" in OBS browser source properties.
 - **Audio**: Web Audio API
 - **Testing**: Vitest
 - **Database**: SQLite (better-sqlite3)
-
-## Future Improvements
-
-- WebRTC for sub-10ms latency
-- Tournament mode with brackets
-- Team logos/image upload
-- Spectator web page
-- Multi-language support
-- Cloud sync for remote competitions
-- Advanced access control (PIN-protected judge login)
+- **Network**: mDNS (optional)

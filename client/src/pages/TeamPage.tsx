@@ -11,6 +11,7 @@ export default function TeamPage() {
   const { status, connected, joinTeam, buzz, timerExpired } = useSocket();
   const joined = useRef(false);
   const [showWinnerAnim, setShowWinnerAnim] = useState(false);
+  const [showFalseStart, setShowFalseStart] = useState(false);
   const prevWinnerRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -28,7 +29,7 @@ export default function TeamPage() {
       prevWinnerRef.current = team;
       setShowWinnerAnim(true);
       playSound('winner', settings.soundEnabled, settings.soundVolume);
-    } else if (status.state === 'READY' && !status.winner) {
+    } else if ((status.state === 'READY' || status.state === 'BUZZER_OPEN') && !status.winner) {
       playSound('ready', settings.soundEnabled, settings.soundVolume);
     }
   }, [status, teamId]);
@@ -40,21 +41,33 @@ export default function TeamPage() {
     }
   }, [timerExpired]);
 
+  useEffect(() => {
+    if (status?.falseStartActive && status.falseStartTeam === teamId) {
+      setShowFalseStart(true);
+      const t = setTimeout(() => setShowFalseStart(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [status?.falseStartActive, status?.falseStartTeam, teamId]);
+
   if (!teamId) return <div className="page error">Invalid team</div>;
 
   const team = teamId;
   const teamInfo = status?.teams.find((t) => t.id === team);
   const teamName = teamInfo?.name ?? `Team ${team}`;
   const isWinner = status?.winner === team;
-  const isDisabled = status?.state !== 'READY';
+  const stateLabel = status?.state ?? 'DISCONNECTED';
+  const isDisabled = stateLabel !== 'READY' && stateLabel !== 'BUZZER_OPEN';
   const score = teamInfo?.score ?? 0;
   const timer = status?.timer;
   const timerDisplay = timer ? Math.ceil(timer.remaining) : null;
+  const questionReading = status?.questionReading ?? false;
+  const profile = status?.teamProfiles?.[teamId];
 
   return (
     <div className="page team-page">
       <div className="team-header">
         <span className="team-title">{teamName}</span>
+        {profile?.institution && <span className="team-institution">{profile.institution}</span>}
         <div className="team-header-right">
           <span className="team-score">{score} pts</span>
           <div className={`status-badge ${connected ? 'online' : 'offline'}`}>
@@ -62,6 +75,19 @@ export default function TeamPage() {
           </div>
         </div>
       </div>
+
+      {showFalseStart && (
+        <div className="false-start-overlay">
+          <div className="false-start-text">FALSE START</div>
+          <div className="false-start-team">{teamName}</div>
+        </div>
+      )}
+
+      {questionReading && !isWinner && (
+        <div className="question-reading-indicator">
+          <div className="reading-text">Listen to question...</div>
+        </div>
+      )}
 
       {timerDisplay !== null && timer?.running && (
         <div className={`team-timer ${timerDisplay <= 5 ? 'urgent' : ''}`}>
